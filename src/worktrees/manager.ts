@@ -85,4 +85,46 @@ export class WorktreeManager {
       throw e;
     }
   }
+
+  async cleanup(loopId: string): Promise<void> {
+    const branchName = `c2/${this.config.runId}/${loopId}`;
+    const worktreePath = join(this.config.worktreeBaseDir, loopId);
+
+    // Remove worktree
+    await execAsync(`git worktree remove "${worktreePath}" --force`, {
+      cwd: this.config.repoDir,
+    });
+
+    // Delete branch
+    try {
+      await execAsync(`git branch -D "${branchName}"`, {
+        cwd: this.config.repoDir,
+      });
+    } catch {
+      // Branch may already be deleted
+    }
+  }
+
+  async cleanupAll(): Promise<void> {
+    const { stdout } = await execAsync(`git worktree list --porcelain`, {
+      cwd: this.config.repoDir,
+    });
+
+    const lines = stdout.split('\n');
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        const path = line.replace('worktree ', '');
+        if (path.includes(this.config.worktreeBaseDir)) {
+          const loopId = path.split('/').pop()!;
+          await this.cleanup(loopId);
+        }
+      }
+    }
+
+    // Clean up empty worktree directory
+    if (existsSync(this.config.worktreeBaseDir)) {
+      rmSync(this.config.worktreeBaseDir, { recursive: true, force: true });
+    }
+  }
 }

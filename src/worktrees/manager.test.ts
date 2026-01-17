@@ -1,7 +1,7 @@
 // src/worktrees/manager.test.ts
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -81,6 +81,37 @@ describe('WorktreeManager', () => {
 
       assert.strictEqual(result.status, 'conflict');
       assert.ok(result.conflictFiles.includes('conflict.txt'));
+    });
+  });
+
+  describe('cleanup()', () => {
+    it('removes worktree and branch', async () => {
+      const { worktreePath, branchName } = await worktreeManager.create('loop-cleanup');
+
+      // Verify worktree exists
+      assert.ok(existsSync(worktreePath));
+
+      // Cleanup
+      await worktreeManager.cleanup('loop-cleanup');
+
+      // Verify worktree removed
+      assert.ok(!existsSync(worktreePath));
+
+      // Verify branch removed
+      const branches = execSync(`git branch --list "${branchName}"`, { cwd: repoDir, stdio: 'pipe' });
+      assert.strictEqual(branches.toString().trim(), '');
+    });
+  });
+
+  describe('cleanupAll()', () => {
+    it('removes all worktrees for this run', async () => {
+      await worktreeManager.create('loop-1');
+      await worktreeManager.create('loop-2');
+
+      await worktreeManager.cleanupAll();
+
+      const worktreeDir = join(repoDir, '.c2', 'worktrees');
+      assert.ok(!existsSync(worktreeDir) || readdirSync(worktreeDir).length === 0);
     });
   });
 });
