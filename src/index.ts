@@ -4,8 +4,9 @@ import { access } from 'node:fs/promises';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { createCLI } from './cli.js';
-import { initializeState } from './state/index.js';
+import { initializeState, loadState, saveRun } from './state/index.js';
 import { runOrchestrator, getExitCode } from './orchestrator/index.js';
+import { createDatabase } from './db/index.js';
 
 async function cleanWorktrees(runId?: string) {
   const worktreeDir = join(process.cwd(), '.sq', 'worktrees');
@@ -64,16 +65,39 @@ async function main() {
 
   const stateDir = resolve(opts.stateDir);
 
-  // Initialize state
-  let state = initializeState({
-    specPath,
-    effort: opts.effort,
-    stateDir,
-    maxLoops: parseInt(opts.maxLoops, 10),
-    maxIterations: parseInt(opts.maxIterations, 10),
-    useWorktrees: !opts.noWorktrees,
-  });
-  console.log(`Initialized new run: ${state.runId}`);
+  let state;
+
+  // Try to resume existing run if --resume flag is set
+  if (opts.resume) {
+    state = loadState(stateDir);
+    if (state) {
+      console.log(`Resuming run: ${state.runId}`);
+      console.log(`Current phase: ${state.phase}`);
+    } else {
+      console.error('Error: --resume specified but no existing run found');
+      process.exit(1);
+    }
+  } else {
+    // Initialize fresh state
+    state = initializeState({
+      specPath,
+      effort: opts.effort,
+      stateDir,
+      maxLoops: parseInt(opts.maxLoops, 10),
+      maxIterations: parseInt(opts.maxIterations, 10),
+      useWorktrees: !opts.noWorktrees,
+    });
+
+    // Initialize database and save the new run
+    const dbPath = join(stateDir, 'state.db');
+    if (!existsSync(stateDir)) {
+      const { mkdirSync } = await import('node:fs');
+      mkdirSync(stateDir, { recursive: true });
+    }
+    createDatabase(dbPath);
+    saveRun(state);
+    console.log(`Initialized new run: ${state.runId}`);
+  }
 
   console.log(`Phase: ${state.phase}`);
   console.log(`Effort: ${state.effort}`);
@@ -113,6 +137,9 @@ async function main() {
       onLoopOutput: (loopId, text) =>
         console.log(`[${loopId.slice(0, 8)}] ${text}`),
     });
+
+    // Save state after each phase for resume support
+    saveRun(state);
 
     // Break if stuck or errored
     const exitCode = getExitCode(state);
