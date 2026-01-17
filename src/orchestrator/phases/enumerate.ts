@@ -3,30 +3,64 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { OrchestratorState, Task } from '../../types/index.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import { ENUMERATE_PROMPT } from '../../agents/prompts.js';
+import { extractJSON } from '../../utils/json-parser.js';
+
+// Task granularity bounds (Risk #5 mitigation)
+const MIN_ESTIMATED_ITERATIONS = 3;
+const MAX_ESTIMATED_ITERATIONS = 25;
+
+export interface GranularityValidation {
+  valid: boolean;
+  warnings: string[];
+}
+
+/**
+ * Validate that tasks are appropriately sized.
+ * Too small = overhead dominates, too large = never completes.
+ */
+export function validateTaskGranularity(tasks: Task[]): GranularityValidation {
+  const warnings: string[] = [];
+
+  for (const task of tasks) {
+    if (task.estimatedIterations < MIN_ESTIMATED_ITERATIONS) {
+      warnings.push(
+        `Task "${task.title}" (${task.id}) may be too small ` +
+        `(${task.estimatedIterations} iterations). Consider combining with related tasks.`
+      );
+    }
+    if (task.estimatedIterations > MAX_ESTIMATED_ITERATIONS) {
+      warnings.push(
+        `Task "${task.title}" (${task.id}) may be too large ` +
+        `(${task.estimatedIterations} iterations). Consider breaking into subtasks.`
+      );
+    }
+    if (task.description.length < 20) {
+      warnings.push(
+        `Task "${task.title}" (${task.id}) has a short description. ` +
+        `More detail helps the build agent.`
+      );
+    }
+  }
+
+  return {
+    valid: warnings.length === 0,
+    warnings,
+  };
+}
 
 export function parseEnumerateOutput(output: string): Task[] {
-  // Extract JSON from markdown code blocks or raw JSON
-  const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-                    output.match(/(\{[\s\S]*"tasks"[\s\S]*\})/);
+  // Use robust JSON parser (Risk #2 mitigation)
+  const parsed = extractJSON<{ tasks: any[] }>(output, ['tasks']);
 
-  if (!jsonMatch) {
-    throw new Error('Failed to parse: No JSON found in output');
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[1].trim());
-    return parsed.tasks.map((t: Record<string, unknown>) => ({
-      id: t.id as string,
-      title: t.title as string,
-      description: t.description as string,
-      status: 'pending' as const,
-      dependencies: (t.dependencies as string[]) || [],
-      estimatedIterations: (t.estimatedIterations as number) || 10,
-      assignedLoopId: null,
-    }));
-  } catch (e) {
-    throw new Error(`Failed to parse: ${e}`);
-  }
+  return parsed.tasks.map((t: any) => ({
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    status: 'pending' as const,
+    dependencies: t.dependencies || [],
+    estimatedIterations: t.estimatedIterations || 10,
+    assignedLoopId: null,
+  }));
 }
 
 export async function executeEnumerate(

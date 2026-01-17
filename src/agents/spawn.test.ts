@@ -18,4 +18,25 @@ describe('Agent Spawning', () => {
     assert.ok(config.allowedTools.includes('Edit'));
     assert.ok(config.allowedTools.includes('Bash'));
   });
+
+  test('createAgentConfig includes MCP server when runId provided', () => {
+    const config = createAgentConfig('enumerate', '/path/to/project', 'test-run', '/custom/db.db');
+
+    assert.ok(config.mcpServers);
+    assert.ok('c2-db' in config.mcpServers!);
+    assert.strictEqual(config.mcpServers!['c2-db'].command, 'node');
+    assert.ok(config.mcpServers!['c2-db'].args.includes('test-run'));
+  });
+
+  test('createAgentConfig without runId has no MCP server', () => {
+    const config = createAgentConfig('enumerate', '/path/to/project');
+
+    assert.strictEqual(config.mcpServers, undefined);
+  });
+
+  test('complete phase has no MCP server even with runId', () => {
+    const config = createAgentConfig('complete', '/path/to/project', 'test-run');
+
+    assert.strictEqual(config.mcpServers, undefined);
+  });
 });

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EffortLevel, OrchestratorState } from '../types/index.js';
 import { OrchestratorStateSchema } from './schema.js';
+import { getEffortConfig } from '../config/effort.js';
 
 const STATE_FILE = 'state.json';
 
@@ -15,6 +16,8 @@ export interface InitStateOptions {
 }
 
 export function initializeState(options: InitStateOptions): OrchestratorState {
+  const effortConfig = getEffortConfig(options.effort);
+
   return {
     runId: randomUUID(),
     specPath: options.specPath,
@@ -33,6 +36,19 @@ export function initializeState(options: InitStateOptions): OrchestratorState {
       errors: [],
       decisions: [],
     },
+    costs: {
+      totalCostUsd: 0,
+      phaseCosts: {
+        enumerate: 0,
+        plan: 0,
+        build: 0,
+        review: 0,
+        revise: 0,
+        complete: 0,
+      },
+      loopCosts: {},
+    },
+    costLimits: effortConfig.costLimits,
     maxLoops: options.maxLoops,
     maxIterations: options.maxIterations,
     stateDir: options.stateDir,

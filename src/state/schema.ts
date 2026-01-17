@@ -34,13 +34,27 @@ export const LoopStateSchema = z.object({
   output: z.array(z.string()),
 });
 
+const PhaseEnum = z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']);
+
+export const CostTrackingSchema = z.object({
+  totalCostUsd: z.number(),
+  phaseCosts: z.record(PhaseEnum, z.number()),
+  loopCosts: z.record(z.string(), z.number()),
+});
+
+export const CostLimitsSchema = z.object({
+  perLoopMaxUsd: z.number(),
+  perPhaseMaxUsd: z.number(),
+  perRunMaxUsd: z.number(),
+});
+
 export const OrchestratorStateSchema = z.object({
   runId: z.string(),
   specPath: z.string(),
   effort: z.enum(['low', 'medium', 'high', 'max']),
-  phase: z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']),
+  phase: PhaseEnum,
   phaseHistory: z.array(z.object({
-    phase: z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']),
+    phase: PhaseEnum,
     success: z.boolean(),
     timestamp: z.string(),
     summary: z.string(),
@@ -57,6 +71,8 @@ export const OrchestratorStateSchema = z.object({
     errors: z.array(z.string()),
     decisions: z.array(z.string()),
   }),
+  costs: CostTrackingSchema,
+  costLimits: CostLimitsSchema,
   maxLoops: z.number(),
   maxIterations: z.number(),
   stateDir: z.string(),

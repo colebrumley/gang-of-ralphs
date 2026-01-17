@@ -5,24 +5,29 @@
   "main": "index.js",
   "type": "module",
   "bin": {
-    "c2": "./bin/c2"
+    "c2": "./bin/c2",
+    "c2-mcp": "./dist/mcp/index.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "test": "node --test"
+    "test": "npx tsx --test",
+    "test:prompts": "tsx scripts/test-prompts.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.11",
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "better-sqlite3": "^12.6.2",
     "commander": "^14.0.2",
     "ink": "^6.6.0",
     "react": "^19.2.3",
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.9",
     "@types/react": "^19.2.8",
     "tsx": "^4.21.0",

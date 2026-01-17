@@ -18,6 +18,18 @@ export interface OrchestratorContext {
   decisions: string[];
 }
 
+export interface CostTracking {
+  totalCostUsd: number;
+  phaseCosts: Record<Phase, number>;
+  loopCosts: Record<string, number>; // loopId -> cost
+}
+
+export interface CostLimits {
+  perLoopMaxUsd: number;
+  perPhaseMaxUsd: number;
+  perRunMaxUsd: number;
+}
+
 export interface OrchestratorState {
   // Identity
   runId: string;
@@ -43,6 +55,10 @@ export interface OrchestratorState {
 
   // Context for agents
   context: OrchestratorContext;
+
+  // Cost tracking (Risk #3 mitigation)
+  costs: CostTracking;
+  costLimits: CostLimits;
 
   // Config
   maxLoops: number;
