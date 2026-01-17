@@ -33,6 +33,9 @@ describe('Review Phase', () => {
 
     assert.ok(prompt.includes('set_review_result'), 'Should instruct use of MCP tool');
     assert.ok(prompt.includes('file'), 'Should request file location');
-    assert.ok(prompt.includes('suggestion') || prompt.includes('fix'), 'Should request fix suggestion');
+    assert.ok(
+      prompt.includes('suggestion') || prompt.includes('fix'),
+      'Should request fix suggestion'
+    );
   });
 });

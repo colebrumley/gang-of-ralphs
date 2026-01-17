@@ -147,7 +147,12 @@ export async function runOrchestrator(
           loopManager.restoreLoop(loop);
         }
 
-        const result = await executeBuildIteration(state, loopManager, callbacks.onLoopOutput, callbacks.tracer);
+        const result = await executeBuildIteration(
+          state,
+          loopManager,
+          callbacks.onLoopOutput,
+          callbacks.tracer
+        );
 
         state.completedTasks = result.completedTasks;
         state.activeLoops = result.activeLoops;

@@ -3,8 +3,8 @@ import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
-import { createNoopTracer } from './noop-tracer.js';
 import { createFileTracer } from './file-tracer.js';
+import { createNoopTracer } from './noop-tracer.js';
 
 describe('NoopTracer', () => {
   test('all methods are callable without error', async () => {
@@ -91,8 +91,14 @@ describe('FileTracer', () => {
     assert.ok(existsSync(outputsDir), 'Outputs directory created');
 
     const files = readdirSync(outputsDir);
-    assert.ok(files.some(f => f.includes('prompt')), 'Prompt file created');
-    assert.ok(files.some(f => f.includes('response')), 'Response file created');
+    assert.ok(
+      files.some((f) => f.includes('prompt')),
+      'Prompt file created'
+    );
+    assert.ok(
+      files.some((f) => f.includes('response')),
+      'Response file created'
+    );
 
     rmSync(testDir, { recursive: true, force: true });
   });

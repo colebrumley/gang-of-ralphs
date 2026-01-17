@@ -68,4 +68,3 @@ export function createAgentConfig(
 
   return config;
 }
-

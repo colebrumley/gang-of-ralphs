@@ -25,9 +25,7 @@ export function loadReviewResultFromDB(runId: string): { passed: boolean; issues
   const db = getDatabase();
 
   // Load review issues
-  const issueRows = db
-    .prepare('SELECT * FROM review_issues WHERE run_id = ?')
-    .all(runId) as Array<{
+  const issueRows = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all(runId) as Array<{
     task_id: string;
     file: string;
     line: number | null;

@@ -33,7 +33,13 @@ export function detectStuck(
     };
     tracer?.logDecision(
       'stuck_detection',
-      { iteration, maxIterations, sameErrorCount: stuckIndicators.sameErrorCount, noProgressCount: stuckIndicators.noProgressCount, threshold: config.stuckThreshold },
+      {
+        iteration,
+        maxIterations,
+        sameErrorCount: stuckIndicators.sameErrorCount,
+        noProgressCount: stuckIndicators.noProgressCount,
+        threshold: config.stuckThreshold,
+      },
       result.reason,
       result.details,
       loop.loopId
@@ -50,7 +56,13 @@ export function detectStuck(
     };
     tracer?.logDecision(
       'stuck_detection',
-      { iteration, maxIterations, sameErrorCount: stuckIndicators.sameErrorCount, noProgressCount: stuckIndicators.noProgressCount, threshold: config.stuckThreshold },
+      {
+        iteration,
+        maxIterations,
+        sameErrorCount: stuckIndicators.sameErrorCount,
+        noProgressCount: stuckIndicators.noProgressCount,
+        threshold: config.stuckThreshold,
+      },
       result.reason,
       result.details,
       loop.loopId
@@ -71,7 +83,13 @@ export function detectStuck(
     };
     tracer?.logDecision(
       'stuck_detection',
-      { iteration, maxIterations, sameErrorCount: stuckIndicators.sameErrorCount, noProgressCount: stuckIndicators.noProgressCount, threshold: config.stuckThreshold },
+      {
+        iteration,
+        maxIterations,
+        sameErrorCount: stuckIndicators.sameErrorCount,
+        noProgressCount: stuckIndicators.noProgressCount,
+        threshold: config.stuckThreshold,
+      },
       result.reason,
       result.details,
       loop.loopId
@@ -82,7 +100,13 @@ export function detectStuck(
   // Log not stuck decision
   tracer?.logDecision(
     'stuck_detection',
-    { iteration, maxIterations, sameErrorCount: stuckIndicators.sameErrorCount, noProgressCount: stuckIndicators.noProgressCount, threshold: config.stuckThreshold },
+    {
+      iteration,
+      maxIterations,
+      sameErrorCount: stuckIndicators.sameErrorCount,
+      noProgressCount: stuckIndicators.noProgressCount,
+      threshold: config.stuckThreshold,
+    },
     'not_stuck',
     'Loop is progressing normally',
     loop.loopId

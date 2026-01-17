@@ -77,6 +77,16 @@ export interface DebugTracer {
     costUsd: number;
     durationMs: number;
   }): Promise<void>;
-  logMcpToolCall(tool: string, input: Record<string, unknown>, result: Record<string, unknown>): void;
-  logDecision(category: string, input: Record<string, unknown>, outcome: string, reason: string, loopId?: string): void;
+  logMcpToolCall(
+    tool: string,
+    input: Record<string, unknown>,
+    result: Record<string, unknown>
+  ): void;
+  logDecision(
+    category: string,
+    input: Record<string, unknown>,
+    outcome: string,
+    reason: string,
+    loopId?: string
+  ): void;
 }

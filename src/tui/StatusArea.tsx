@@ -46,7 +46,13 @@ function getPhaseColor(phase: Phase): string {
   }
 }
 
-export function StatusArea({ phase, isLoading, statusMessage, output, minimized }: StatusAreaProps) {
+export function StatusArea({
+  phase,
+  isLoading,
+  statusMessage,
+  output,
+  minimized,
+}: StatusAreaProps) {
   // In minimized mode (during build), show just a compact status line
   if (minimized) {
     return (

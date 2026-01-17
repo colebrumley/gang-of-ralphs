@@ -54,9 +54,7 @@ export function validateTaskGranularity(tasks: Task[]): GranularityValidation {
  */
 export function loadTasksFromDB(runId: string): Task[] {
   const db = getDatabase();
-  const taskRows = db
-    .prepare('SELECT * FROM tasks WHERE run_id = ?')
-    .all(runId) as Array<{
+  const taskRows = db.prepare('SELECT * FROM tasks WHERE run_id = ?').all(runId) as Array<{
     id: string;
     title: string;
     description: string;

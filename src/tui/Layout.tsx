@@ -13,7 +13,14 @@ interface LayoutProps {
   focusedLoopIndex: number | null;
 }
 
-export function Layout({ state, loops, isLoading, statusMessage, phaseOutput, focusedLoopIndex }: LayoutProps) {
+export function Layout({
+  state,
+  loops,
+  isLoading,
+  statusMessage,
+  phaseOutput,
+  focusedLoopIndex,
+}: LayoutProps) {
   const activeLoops = loops.filter((l) => l.status === 'running' || l.status === 'pending');
   // Minimize status area during build phase when loops are active
   const minimizeStatus = state.phase === 'build' && activeLoops.length > 0;
@@ -34,7 +41,14 @@ export function Layout({ state, loops, isLoading, statusMessage, phaseOutput, fo
         {loops.slice(0, state.maxLoops).map((loop, index) => {
           const task = state.tasks.find((t) => t.id === loop.taskIds[0]);
           const isFocused = focusedLoopIndex === index;
-          return <Column key={loop.loopId} loop={loop} taskTitle={task?.title || 'Unknown'} isFocused={isFocused} />;
+          return (
+            <Column
+              key={loop.loopId}
+              loop={loop}
+              taskTitle={task?.title || 'Unknown'}
+              isFocused={isFocused}
+            />
+          );
         })}
 
         {/* Empty columns if fewer loops than max */}

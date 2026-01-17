@@ -95,7 +95,11 @@ class FileTracer implements DebugTracer {
     });
   }
 
-  logMcpToolCall(tool: string, input: Record<string, unknown>, result: Record<string, unknown>): void {
+  logMcpToolCall(
+    tool: string,
+    input: Record<string, unknown>,
+    result: Record<string, unknown>
+  ): void {
     this.addEvent({
       type: 'mcp_tool_call',
       timestamp: new Date().toISOString(),
@@ -140,10 +144,7 @@ class FileTracer implements DebugTracer {
 
   private async doSaveTrace(): Promise<void> {
     if (this.trace) {
-      await writeFile(
-        join(this.debugDir, 'trace.json'),
-        JSON.stringify(this.trace, null, 2)
-      );
+      await writeFile(join(this.debugDir, 'trace.json'), JSON.stringify(this.trace, null, 2));
     }
   }
 }
