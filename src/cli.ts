@@ -67,3 +67,20 @@ export function createCLI(): Command {
 
   return program;
 }
+
+export interface CleanOptions {
+  run?: string;
+  all: boolean;
+}
+
+export function createCleanCLI(): Command {
+  const program = new Command();
+
+  program
+    .name('c2 clean')
+    .description('Clean up stale worktrees')
+    .option('--run <id>', 'Clean worktrees for specific run')
+    .option('--all', 'Clean all c2 worktrees', false);
+
+  return program;
+}

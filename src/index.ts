@@ -1,11 +1,54 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { access } from 'node:fs/promises';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { createCLI } from './cli.js';
 import { initializeState } from './state/index.js';
 import { runOrchestrator, getExitCode } from './orchestrator/index.js';
 
+async function cleanWorktrees(runId?: string) {
+  const worktreeDir = join(process.cwd(), '.c2', 'worktrees');
+
+  if (!existsSync(worktreeDir)) {
+    console.log('No worktrees to clean');
+    return;
+  }
+
+  const dirs = readdirSync(worktreeDir);
+
+  for (const dir of dirs) {
+    if (runId && !dir.includes(runId)) continue;
+
+    const worktreePath = join(worktreeDir, dir);
+    try {
+      execSync(`git worktree remove "${worktreePath}" --force`, { stdio: 'pipe' });
+      console.log(`Removed worktree: ${dir}`);
+    } catch {
+      rmSync(worktreePath, { recursive: true, force: true });
+      console.log(`Force removed: ${dir}`);
+    }
+  }
+
+  // Prune worktree list
+  try {
+    execSync('git worktree prune', { stdio: 'pipe' });
+  } catch {
+    // Ignore if not in a git repo
+  }
+  console.log('Worktree cleanup complete');
+}
+
 async function main() {
+  const args = process.argv.slice(2);
+
+  // Handle clean subcommand
+  if (args[0] === 'clean') {
+    const runId = args.includes('--run') ? args[args.indexOf('--run') + 1] : undefined;
+    await cleanWorktrees(runId);
+    return;
+  }
+
   const program = createCLI();
   program.parse();
   const opts = program.opts();
