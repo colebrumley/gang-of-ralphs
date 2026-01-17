@@ -38,4 +38,49 @@ describe('WorktreeManager', () => {
       assert.ok(result.branchName.includes('c2/test-run-123/loop-abc'));
     });
   });
+
+  describe('merge()', () => {
+    it('merges worktree branch to base branch', async () => {
+      // Create worktree
+      const { worktreePath, branchName } = await worktreeManager.create('loop-merge');
+
+      // Make a change in the worktree
+      execSync(`echo "test content" > test.txt && git add test.txt && git commit -m "add test"`, {
+        cwd: worktreePath,
+        stdio: 'pipe',
+      });
+
+      // Merge back
+      const result = await worktreeManager.merge('loop-merge');
+
+      assert.strictEqual(result.status, 'success');
+
+      // Verify file exists on base branch
+      const fileExists = execSync(`git show main:test.txt`, { cwd: repoDir, stdio: 'pipe' });
+      assert.ok(fileExists.toString().includes('test content'));
+    });
+
+    it('detects merge conflicts', async () => {
+      // Create worktree
+      const { worktreePath } = await worktreeManager.create('loop-conflict');
+
+      // Make a change in the worktree
+      execSync(`echo "worktree change" > conflict.txt && git add conflict.txt && git commit -m "worktree"`, {
+        cwd: worktreePath,
+        stdio: 'pipe',
+      });
+
+      // Make conflicting change on base branch
+      execSync(`echo "base change" > conflict.txt && git add conflict.txt && git commit -m "base"`, {
+        cwd: repoDir,
+        stdio: 'pipe',
+      });
+
+      // Attempt merge
+      const result = await worktreeManager.merge('loop-conflict');
+
+      assert.strictEqual(result.status, 'conflict');
+      assert.ok(result.conflictFiles.includes('conflict.txt'));
+    });
+  });
 });

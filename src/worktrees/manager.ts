@@ -46,4 +46,43 @@ export class WorktreeManager {
 
     return { worktreePath, branchName };
   }
+
+  async merge(loopId: string): Promise<MergeResult> {
+    const branchName = `c2/${this.config.runId}/${loopId}`;
+    const worktreePath = join(this.config.worktreeBaseDir, loopId);
+
+    // Commit any uncommitted changes in worktree
+    try {
+      await execAsync(
+        `git add -A && git diff --cached --quiet || git commit -m "auto-commit before merge"`,
+        { cwd: worktreePath }
+      );
+    } catch {
+      // Ignore - may have nothing to commit
+    }
+
+    // Switch to base branch in main repo
+    await execAsync(`git checkout ${this.config.baseBranch}`, { cwd: this.config.repoDir });
+
+    // Attempt merge
+    try {
+      await execAsync(`git merge --no-ff "${branchName}" -m "Merge ${loopId}"`, {
+        cwd: this.config.repoDir,
+      });
+      return { status: 'success' };
+    } catch (e) {
+      // Check for conflicts
+      const { stdout } = await execAsync(`git diff --name-only --diff-filter=U`, {
+        cwd: this.config.repoDir,
+      });
+      const conflictFiles = stdout.trim().split('\n').filter(Boolean);
+
+      if (conflictFiles.length > 0) {
+        return { status: 'conflict', conflictFiles };
+      }
+
+      // Re-throw if not a conflict error
+      throw e;
+    }
+  }
 }
