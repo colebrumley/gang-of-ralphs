@@ -6,7 +6,7 @@
 
 **Architecture:** Stateless orchestrator runs inside outer Ralph loop. Reads state from disk, executes one phase, saves state, exits. Spawns Claude Code agents via SDK for actual work. Parallel loops for independent tasks.
 
-**Tech Stack:** TypeScript, @anthropic-ai/claude-agent-sdk, commander (CLI), ink (TUI), zod (validation)
+**Tech Stack:** TypeScript, @anthropic-ai/claude-agent-sdk, commander (CLI), ink (TUI), zod (validation), better-sqlite3, @anthropic-ai/sdk (MCP)
 
 ---
 
@@ -16,11 +16,42 @@ This plan addresses the following high-priority risks:
 
 | Risk | Mitigation | Task |
 |------|------------|------|
-| **JSON Parsing Fragility** | Multi-strategy parser with retries | Task 3 |
+| **JSON Parsing Fragility** | Eliminated - agents write to SQLite via MCP tools | Task 3, 3A |
 | **Prompt Engineering Quality** | Prompt testing harness | Task 6A |
 | **Cost Runaway** | Cost tracking + limits | Tasks 2, 5, 13 |
 | **Task Granularity** | Validation in enumerate phase | Task 7 |
 | **Stuck Detection Accuracy** | Configurable thresholds + logging | Task 10 |
+
+---
+
+## Architecture: SQLite + MCP
+
+Instead of agents outputting JSON that we parse, agents write directly to SQLite via MCP tools:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Claude Agent                           │
+│  (calls MCP tools instead of outputting JSON)               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ MCP Protocol
+┌─────────────────────────────────────────────────────────────┐
+│                    c2-mcp-server                            │
+│  Tools: write_task, complete_task, add_plan_group, etc.     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  SQLite: .c2/state.db                       │
+│  Tables: runs, tasks, loops, phases, costs                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Benefits:**
+- No JSON parsing errors - tool params are already structured
+- Atomic transactions - no state corruption
+- Queryable history - can analyze past runs
+- Type-safe - MCP tool schemas enforce structure
 
 ---
 
@@ -40,8 +71,8 @@ Run: `npm init -y`
 
 Run:
 ```bash
-npm install @anthropic-ai/claude-agent-sdk commander zod
-npm install -D typescript @types/node tsx
+npm install @anthropic-ai/claude-agent-sdk @modelcontextprotocol/sdk commander zod better-sqlite3
+npm install -D typescript @types/node @types/better-sqlite3 tsx
 ```
 
 **Step 3: Create tsconfig.json**
