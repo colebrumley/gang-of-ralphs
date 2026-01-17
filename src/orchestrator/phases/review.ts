@@ -1,12 +1,36 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { OrchestratorState, ReviewType } from '../../types/index.js';
+import type { OrchestratorState, ReviewType, ReviewIssue, ReviewIssueType } from '../../types/index.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import type { EffortConfig } from '../../config/effort.js';
 
 export interface ReviewResult {
   passed: boolean;
-  issues: string[];
+  issues: ReviewIssue[];
   suggestions: string[];
+}
+
+function normalizeIssue(issue: unknown): ReviewIssue {
+  if (typeof issue === 'string') {
+    // Legacy format: convert string to structured issue
+    return {
+      taskId: '',
+      file: 'unknown',
+      type: 'pattern-violation' as ReviewIssueType,
+      description: issue,
+      suggestion: 'Review and fix this issue',
+    };
+  }
+
+  // Structured format
+  const obj = issue as Record<string, unknown>;
+  return {
+    taskId: '',
+    file: (obj.file as string) || 'unknown',
+    line: obj.line as number | undefined,
+    type: (obj.type as ReviewIssueType) || 'pattern-violation',
+    description: (obj.description as string) || 'Unknown issue',
+    suggestion: (obj.suggestion as string) || 'Review and fix',
+  };
 }
 
 export function parseReviewOutput(output: string): ReviewResult {
@@ -14,19 +38,40 @@ export function parseReviewOutput(output: string): ReviewResult {
                     output.match(/(\{[\s\S]*"passed"[\s\S]*\})/);
 
   if (!jsonMatch) {
-    // Default to failed if can't parse
-    return { passed: false, issues: ['Failed to parse review output'], suggestions: [] };
+    return {
+      passed: false,
+      issues: [{
+        taskId: '',
+        file: 'unknown',
+        type: 'pattern-violation',
+        description: 'Failed to parse review output',
+        suggestion: 'Check agent output format'
+      }],
+      suggestions: []
+    };
   }
 
   try {
     const parsed = JSON.parse(jsonMatch[1].trim());
+    const rawIssues = parsed.issues ?? [];
+
     return {
       passed: parsed.passed ?? false,
-      issues: parsed.issues ?? [],
+      issues: rawIssues.map((issue: unknown) => normalizeIssue(issue)),
       suggestions: parsed.suggestions ?? [],
     };
   } catch {
-    return { passed: false, issues: ['Failed to parse review JSON'], suggestions: [] };
+    return {
+      passed: false,
+      issues: [{
+        taskId: '',
+        file: 'unknown',
+        type: 'pattern-violation',
+        description: 'Failed to parse review JSON',
+        suggestion: 'Check JSON syntax'
+      }],
+      suggestions: []
+    };
   }
 }
 

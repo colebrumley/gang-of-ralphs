@@ -18,7 +18,7 @@ describe('Review Phase', () => {
     assert.strictEqual(result.issues.length, 0);
   });
 
-  test('parseReviewOutput extracts issues', () => {
+  test('parseReviewOutput extracts issues count', () => {
     const output = `\`\`\`json
 {
   "passed": false,
@@ -31,6 +31,8 @@ describe('Review Phase', () => {
 
     assert.strictEqual(result.passed, false);
     assert.strictEqual(result.issues.length, 2);
+    // Issues are now normalized to ReviewIssue objects
+    assert.strictEqual(result.issues[0].description, 'Missing error handling');
   });
 
   test('getReviewPrompt varies by depth', () => {
@@ -54,5 +56,49 @@ describe('Review Phase', () => {
     assert.ok(prompt.includes('file'), 'Should request file location');
     assert.ok(prompt.includes('line') || prompt.includes('location'), 'Should request line number');
     assert.ok(prompt.includes('suggestion') || prompt.includes('fix'), 'Should request fix suggestion');
+  });
+
+  test('parseReviewOutput extracts structured issues', () => {
+    const output = `\`\`\`json
+{
+  "passed": false,
+  "issues": [
+    {
+      "file": "src/utils.ts",
+      "line": 15,
+      "type": "over-engineering",
+      "description": "Unnecessary wrapper class",
+      "suggestion": "Use a plain function instead"
+    }
+  ],
+  "suggestions": []
+}
+\`\`\``;
+
+    const result = parseReviewOutput(output);
+
+    assert.strictEqual(result.passed, false);
+    assert.strictEqual(result.issues.length, 1);
+    assert.strictEqual(result.issues[0].file, 'src/utils.ts');
+    assert.strictEqual(result.issues[0].line, 15);
+    assert.strictEqual(result.issues[0].type, 'over-engineering');
+  });
+
+  test('parseReviewOutput handles legacy string issues', () => {
+    const output = `\`\`\`json
+{
+  "passed": false,
+  "issues": ["Missing error handling", "No tests"],
+  "suggestions": []
+}
+\`\`\``;
+
+    const result = parseReviewOutput(output);
+
+    assert.strictEqual(result.passed, false);
+    assert.strictEqual(result.issues.length, 2);
+    // Legacy issues should be converted to structured format
+    assert.strictEqual(result.issues[0].description, 'Missing error handling');
+    assert.strictEqual(result.issues[0].type, 'pattern-violation');
   });
 });
