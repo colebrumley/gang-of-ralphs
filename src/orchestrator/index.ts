@@ -1,6 +1,8 @@
+import { join } from 'node:path';
 import type { OrchestratorState, Phase } from '../types/index.js';
 import { getEffortConfig } from '../config/effort.js';
 import { LoopManager } from '../loops/manager.js';
+import { WorktreeManager } from '../worktrees/manager.js';
 import { executeEnumerate } from './phases/enumerate.js';
 import { executePlan } from './phases/plan.js';
 import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
@@ -65,11 +67,21 @@ export async function runOrchestrator(
       }
 
       case 'build': {
+        // Create WorktreeManager if worktrees are enabled
+        const worktreeManager = state.useWorktrees && state.baseBranch
+          ? new WorktreeManager({
+              repoDir: process.cwd(),
+              worktreeBaseDir: join(state.stateDir, 'worktrees'),
+              baseBranch: state.baseBranch,
+              runId: state.runId,
+            })
+          : undefined;
+
         const loopManager = new LoopManager({
           maxLoops: state.maxLoops,
           maxIterations: state.maxIterations,
           reviewInterval: effortConfig.reviewInterval,
-        });
+        }, worktreeManager);
 
         // Restore active loops from state
         for (const loop of state.activeLoops) {

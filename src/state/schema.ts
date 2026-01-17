@@ -76,4 +76,6 @@ export const OrchestratorStateSchema = z.object({
   maxLoops: z.number(),
   maxIterations: z.number(),
   stateDir: z.string(),
+  baseBranch: z.string().nullable(),
+  useWorktrees: z.boolean(),
 });
