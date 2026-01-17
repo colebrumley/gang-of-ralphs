@@ -81,6 +81,7 @@ export function initializeState(options: InitStateOptions): OrchestratorState {
     stateDir: options.stateDir,
     baseBranch,
     useWorktrees,
+    pendingConflict: null,
   };
 }
 
@@ -311,6 +312,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     stateDir,
     baseBranch: run.base_branch,
     useWorktrees: run.use_worktrees === 1,
+    pendingConflict: null,
   };
 }
 

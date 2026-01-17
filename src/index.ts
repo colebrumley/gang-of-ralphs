@@ -7,6 +7,7 @@ import { createCLI } from './cli.js';
 import { initializeState, loadState, saveRun } from './state/index.js';
 import { runOrchestrator, getExitCode } from './orchestrator/index.js';
 import { createDatabase } from './db/index.js';
+import { printDryRunSummary } from './orchestrator/summary.js';
 
 async function cleanWorktrees(runId?: string) {
   const worktreeDir = join(process.cwd(), '.sq', 'worktrees');
@@ -103,7 +104,41 @@ async function main() {
   console.log(`Effort: ${state.effort}`);
 
   if (opts.dryRun) {
-    console.log('[dry-run] Would execute phase:', state.phase);
+    console.log('[dry-run] Running ENUMERATE and PLAN phases...\n');
+
+    // Run ENUMERATE phase
+    state = await runOrchestrator(state, {
+      onPhaseStart: (phase) => console.log(`Starting phase: ${phase}`),
+      onPhaseComplete: (phase, success) =>
+        console.log(`Phase ${phase} ${success ? 'completed' : 'failed'}`),
+      onOutput: (text) => process.stdout.write(text),
+    });
+
+    if (state.context.errors.length > 0) {
+      console.error('Errors during ENUMERATE:', state.context.errors);
+      process.exit(1);
+    }
+
+    // Run PLAN phase (may need to skip review if effort config enables it)
+    while (state.phase === 'review' || state.phase === 'plan') {
+      state = await runOrchestrator(state, {
+        onPhaseStart: (phase) => console.log(`Starting phase: ${phase}`),
+        onPhaseComplete: (phase, success) =>
+          console.log(`Phase ${phase} ${success ? 'completed' : 'failed'}`),
+        onOutput: (text) => process.stdout.write(text),
+      });
+
+      if (state.context.errors.length > 0) {
+        console.error('Errors during PLAN:', state.context.errors);
+        process.exit(1);
+      }
+
+      // Stop once we've reached build phase (plan complete)
+      if (state.phase === 'build') break;
+    }
+
+    // Print dry-run summary
+    printDryRunSummary(state);
     return;
   }
 

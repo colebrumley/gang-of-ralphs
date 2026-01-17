@@ -34,7 +34,7 @@ export const LoopStateSchema = z.object({
   output: z.array(z.string()),
 });
 
-const PhaseEnum = z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']);
+const PhaseEnum = z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'conflict', 'complete']);
 
 export const CostTrackingSchema = z.object({
   totalCostUsd: z.number(),
@@ -70,6 +70,14 @@ export const OrchestratorStateSchema = z.object({
     discoveries: z.array(z.string()),
     errors: z.array(z.string()),
     decisions: z.array(z.string()),
+    reviewIssues: z.array(z.object({
+      taskId: z.string(),
+      file: z.string(),
+      line: z.number().optional(),
+      type: z.enum(['over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code']),
+      description: z.string(),
+      suggestion: z.string(),
+    })),
   }),
   costs: CostTrackingSchema,
   costLimits: CostLimitsSchema,
@@ -78,4 +86,9 @@ export const OrchestratorStateSchema = z.object({
   stateDir: z.string(),
   baseBranch: z.string().nullable(),
   useWorktrees: z.boolean(),
+  pendingConflict: z.object({
+    loopId: z.string(),
+    taskId: z.string(),
+    conflictFiles: z.array(z.string()),
+  }).nullable(),
 });

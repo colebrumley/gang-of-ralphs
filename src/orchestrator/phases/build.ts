@@ -5,7 +5,6 @@ import { BUILD_PROMPT } from '../../agents/prompts.js';
 import { LoopManager } from '../../loops/manager.js';
 import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
 import { getEffortConfig } from '../../config/effort.js';
-import { resolveConflict } from './conflict.js';
 
 export function buildPromptWithFeedback(
   task: Task,
@@ -74,6 +73,11 @@ export interface BuildResult {
   activeLoops: LoopState[];
   needsReview: boolean;
   stuck: boolean;
+  pendingConflict?: {
+    loopId: string;
+    taskId: string;
+    conflictFiles: string[];
+  };
 }
 
 export async function executeBuildIteration(
@@ -150,18 +154,17 @@ export async function executeBuildIteration(
           const mergeResult = await worktreeManager.merge(loop.loopId);
 
           if (mergeResult.status === 'conflict') {
-            // Spawn conflict resolution agent
-            const conflictResult = await resolveConflict(
-              task,
-              mergeResult.conflictFiles,
-              config.cwd,
-              (text) => onLoopOutput?.(loop.loopId, text)
-            );
-
-            if (!conflictResult.resolved) {
-              loopManager.updateLoopStatus(loop.loopId, 'failed');
-              return { loopId: loop.loopId, taskId: task.id, completed: false };
-            }
+            // Return conflict info for orchestrator to handle in conflict phase
+            return {
+              loopId: loop.loopId,
+              taskId: task.id,
+              completed: false,
+              conflict: {
+                loopId: loop.loopId,
+                taskId: task.id,
+                conflictFiles: mergeResult.conflictFiles,
+              },
+            };
           }
 
           // Cleanup worktree on successful merge
@@ -191,6 +194,18 @@ export async function executeBuildIteration(
 
   const results = await Promise.all(loopPromises);
   const newlyCompleted = results.filter(r => r.completed).map(r => r.taskId);
+
+  // Check for conflicts - return first one found for orchestrator to handle
+  const conflictResult = results.find(r => 'conflict' in r && r.conflict);
+  if (conflictResult && 'conflict' in conflictResult && conflictResult.conflict) {
+    return {
+      completedTasks: [...state.completedTasks, ...newlyCompleted],
+      activeLoops: loopManager.getAllLoops(),
+      needsReview: false,
+      stuck: false,
+      pendingConflict: conflictResult.conflict,
+    };
+  }
 
   // Check if any loop needs review
   const needsReview = loopManager.getActiveLoops().some(loop =>

@@ -80,4 +80,11 @@ export interface OrchestratorState {
   // Git worktree isolation
   baseBranch: string | null; // null if not a git repo
   useWorktrees: boolean;
+
+  // Conflict resolution
+  pendingConflict: {
+    loopId: string;
+    taskId: string;
+    conflictFiles: string[];
+  } | null;
 }

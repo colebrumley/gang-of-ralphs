@@ -7,6 +7,7 @@ import { executeEnumerate } from './phases/enumerate.js';
 import { executePlan } from './phases/plan.js';
 import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
 import { executeReview } from './phases/review.js';
+import { resolveConflict } from './phases/conflict.js';
 
 export interface OrchestratorCallbacks {
   onPhaseStart?: (phase: Phase) => void;
@@ -97,7 +98,11 @@ export async function runOrchestrator(
         state.completedTasks = result.completedTasks;
         state.activeLoops = result.activeLoops;
 
-        if (result.stuck) {
+        if (result.pendingConflict) {
+          // Merge conflict detected - transition to conflict phase
+          state.pendingConflict = result.pendingConflict;
+          state.phase = 'conflict';
+        } else if (result.stuck) {
           state.phase = 'revise';
         } else if (result.needsReview) {
           state.pendingReview = true;
@@ -172,6 +177,50 @@ export async function runOrchestrator(
           timestamp: new Date().toISOString(),
           summary: `Revision ${state.revisionCount} - returning to build`,
         });
+        break;
+      }
+
+      case 'conflict': {
+        if (!state.pendingConflict) {
+          throw new Error('Conflict phase entered without pendingConflict state');
+        }
+
+        const { loopId, taskId, conflictFiles } = state.pendingConflict;
+        const task = state.tasks.find(t => t.id === taskId);
+
+        if (!task) {
+          throw new Error(`Task ${taskId} not found for conflict resolution`);
+        }
+
+        const result = await resolveConflict(
+          task,
+          conflictFiles,
+          state.stateDir,
+          callbacks.onOutput
+        );
+
+        state.phaseHistory.push({
+          phase: 'conflict',
+          success: result.resolved,
+          timestamp: new Date().toISOString(),
+          summary: result.resolved
+            ? `Resolved merge conflict in ${conflictFiles.length} file(s)`
+            : `Failed to resolve conflict: ${result.error}`,
+        });
+
+        if (result.resolved) {
+          state.pendingConflict = null;
+          state.phase = 'build';
+        } else {
+          // Mark the loop as failed
+          const loop = state.activeLoops.find(l => l.loopId === loopId);
+          if (loop) {
+            loop.status = 'failed';
+          }
+          state.context.errors.push(`Conflict resolution failed: ${result.error}`);
+          state.pendingConflict = null;
+          state.phase = 'build';
+        }
         break;
       }
 
