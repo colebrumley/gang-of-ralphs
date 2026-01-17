@@ -1,4 +1,4 @@
-export type { DebugTracer, DebugEvent, TraceFile } from './types.js';
+export type { DebugTracer, DebugEvent, StateSnapshotEvent, TraceFile } from './types.js';
 export { createNoopTracer } from './noop-tracer.js';
 export { createFileTracer } from './file-tracer.js';
 

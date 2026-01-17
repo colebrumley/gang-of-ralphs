@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { getEffortConfig } from '../config/effort.js';
 import { checkRunCostLimit, formatCostExceededError } from '../costs/index.js';
-import type { DebugTracer } from '../debug/index.js';
+import type { DebugTracer, StateSnapshotEvent } from '../debug/index.js';
 import { LoopManager } from '../loops/manager.js';
 import type { CostTracking, OrchestratorState, Phase } from '../types/index.js';
 import { WorktreeManager } from '../worktrees/manager.js';
@@ -21,6 +21,31 @@ function updateCosts(costs: CostTracking, phase: Phase, costUsd: number, loopId?
   if (loopId) {
     costs.loopCosts[loopId] = (costs.loopCosts[loopId] || 0) + costUsd;
   }
+}
+
+function buildStateSnapshot(state: OrchestratorState): StateSnapshotEvent['state'] {
+  return {
+    phase: state.phase,
+    tasks: {
+      total: state.tasks.length,
+      completed: state.completedTasks.length,
+      failed: state.tasks.filter((t) => t.status === 'failed').length,
+    },
+    loops: {
+      active: state.activeLoops.filter((l) => l.status === 'running').length,
+      stuck: state.activeLoops.filter((l) => l.status === 'stuck').length,
+      completed: state.activeLoops.filter((l) => l.status === 'completed').length,
+    },
+    context: {
+      discoveryCount: state.context.discoveries.length,
+      errorCount: state.context.errors.length,
+      decisionCount: state.context.decisions.length,
+    },
+    costs: {
+      totalUsd: state.costs.totalCostUsd,
+      byPhase: state.costs.phaseCosts,
+    },
+  };
 }
 
 export interface OrchestratorCallbacks {
@@ -364,9 +389,23 @@ export async function runOrchestrator(
       );
     }
 
+    // Log state snapshot on phase transition
+    const previousPhase = phaseEntry?.phase;
+    if (previousPhase && previousPhase !== state.phase) {
+      callbacks.tracer?.logStateSnapshot('phase_transition', buildStateSnapshot(state));
+    }
+
+    // Log run complete snapshot
+    if (state.phase === 'complete') {
+      callbacks.tracer?.logStateSnapshot('run_complete', buildStateSnapshot(state));
+    }
+
     callbacks.onPhaseComplete?.(state.phase, true);
   } catch (error) {
-    state.context.errors.push(String(error));
+    const errorStr = String(error);
+    state.context.errors.push(errorStr);
+    callbacks.tracer?.logError(errorStr, state.phase);
+    callbacks.tracer?.logStateSnapshot('error', buildStateSnapshot(state));
     callbacks.onPhaseComplete?.(state.phase, false);
   }
 
