@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { DebugTracer } from '../debug/index.js';
 import type { LoopState, Task } from '../types/index.js';
 import type { WorktreeManager } from '../worktrees/manager.js';
 
@@ -12,10 +13,12 @@ export class LoopManager {
   private loops: Map<string, LoopState> = new Map();
   private config: LoopManagerConfig;
   private worktreeManager: WorktreeManager | null;
+  private tracer: DebugTracer | null;
 
-  constructor(config: LoopManagerConfig, worktreeManager?: WorktreeManager) {
+  constructor(config: LoopManagerConfig, worktreeManager?: WorktreeManager, tracer?: DebugTracer) {
     this.config = config;
     this.worktreeManager = worktreeManager ?? null;
+    this.tracer = tracer ?? null;
   }
 
   async createLoop(taskIds: string[], tasks: Task[], phase = 'build'): Promise<LoopState> {
@@ -56,6 +59,8 @@ export class LoopManager {
       }
     }
 
+    this.tracer?.logLoopCreated(loopId, taskIds, worktreePath);
+
     return loop;
   }
 
@@ -87,7 +92,11 @@ export class LoopManager {
   updateLoopStatus(loopId: string, status: LoopState['status']): void {
     const loop = this.loops.get(loopId);
     if (loop) {
+      const previousStatus = loop.status;
       loop.status = status;
+      if (previousStatus !== status) {
+        this.tracer?.logLoopStatusChange(loopId, status, loop.taskIds);
+      }
     }
   }
 
@@ -95,6 +104,7 @@ export class LoopManager {
     const loop = this.loops.get(loopId);
     if (loop) {
       loop.iteration++;
+      this.tracer?.logLoopIteration(loopId, loop.iteration);
     }
   }
 
