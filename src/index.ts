@@ -67,6 +67,14 @@ async function main() {
 
   const stateDir = resolve(opts.stateDir);
 
+  // Handle --reset flag: clear existing state before starting fresh
+  if (opts.reset) {
+    if (existsSync(stateDir)) {
+      rmSync(stateDir, { recursive: true, force: true });
+      console.log(`Cleared existing state: ${stateDir}`);
+    }
+  }
+
   let state;
 
   // Try to resume existing run if --resume flag is set

@@ -43,6 +43,9 @@ export function App({ initialState }: AppProps) {
   const [statusMessage, setStatusMessage] = useState(getPhaseStatusMessage(initialState.phase));
   const [phaseOutput, setPhaseOutput] = useState<string[]>([]);
 
+  // UI state for focused column (null = no focus, 0-3 = focused column index)
+  const [focusedLoopIndex, setFocusedLoopIndex] = useState<number | null>(null);
+
   // Keep stateRef in sync for signal handler access
   useEffect(() => {
     stateRef.current = state;
@@ -84,6 +87,19 @@ export function App({ initialState }: AppProps) {
     }
     if (input === 'p') {
       setRunning((prev) => !prev);
+    }
+    if (input === 'r') {
+      // Trigger immediate review by setting pendingReview flag
+      setState((prev) => ({
+        ...prev,
+        pendingReview: true,
+        reviewType: prev.phase === 'build' ? 'build' : prev.phase === 'plan' ? 'plan' : 'enumerate',
+      }));
+    }
+    // Focus on loop column 1-4 (or unfocus if same key pressed again)
+    if (input >= '1' && input <= '4') {
+      const index = Number.parseInt(input, 10) - 1;
+      setFocusedLoopIndex((prev) => (prev === index ? null : index));
     }
   });
 
@@ -137,6 +153,7 @@ export function App({ initialState }: AppProps) {
       isLoading={isLoading}
       statusMessage={statusMessage}
       phaseOutput={phaseOutput}
+      focusedLoopIndex={focusedLoopIndex}
     />
   );
 }

@@ -1,12 +1,12 @@
 import { resolve } from 'node:path';
 import type { Phase } from '../types/index.js';
 
-export interface MCPServerConfig {
+interface MCPServerConfig {
   command: string;
   args: string[];
 }
 
-export interface AgentConfig {
+interface AgentConfig {
   cwd: string;
   allowedTools: string[];
   permissionMode: 'bypassPermissions' | 'acceptEdits';
@@ -69,10 +69,3 @@ export function createAgentConfig(
   return config;
 }
 
-export interface AgentMessage {
-  type: 'assistant' | 'result' | 'tool';
-  content?: string;
-  toolName?: string;
-}
-
-export type AgentOutputHandler = (message: AgentMessage) => void;
