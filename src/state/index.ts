@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { EffortLevel, OrchestratorState, Task, LoopState, Phase, ReviewType } from '../types/index.js';
+import type { EffortLevel, OrchestratorState, Task, LoopState, Phase, ReviewType, ReviewIssue, ReviewIssueType } from '../types/index.js';
 import { getEffortConfig } from '../config/effort.js';
 import { createDatabase, getDatabase, closeDatabase } from '../db/index.js';
 
@@ -269,6 +269,27 @@ export function loadState(stateDir: string): OrchestratorState | null {
     else if (row.entry_type === 'decision') decisions.push(row.content);
   }
 
+  // Load review issues
+  const reviewIssueRows = db.prepare(`
+    SELECT * FROM review_issues WHERE run_id = ?
+  `).all(run.id) as Array<{
+    task_id: string;
+    file: string;
+    line: number | null;
+    type: ReviewIssueType;
+    description: string;
+    suggestion: string;
+  }>;
+
+  const reviewIssues: ReviewIssue[] = reviewIssueRows.map(row => ({
+    taskId: row.task_id,
+    file: row.file,
+    line: row.line ?? undefined,
+    type: row.type,
+    description: row.description,
+    suggestion: row.suggestion,
+  }));
+
   // Get completed task IDs
   const completedTasks = tasks.filter(t => t.status === 'completed').map(t => t.id);
 
@@ -292,7 +313,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
       discoveries,
       errors,
       decisions,
-      reviewIssues: [],
+      reviewIssues,
     },
     costs: {
       totalCostUsd: run.total_cost_usd,

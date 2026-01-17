@@ -85,4 +85,37 @@ describe('MCP Server', () => {
     assert.strictEqual(entries[0].entry_type, 'discovery');
     assert.strictEqual(entries[0].content, 'Found existing pattern');
   });
+
+  test('set_review_result stores structured review issues', () => {
+    const db = getDatabase();
+
+    // Insert a structured review issue
+    db.prepare(`
+      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('test-run', 'task-1', 'src/index.ts', 42, 'over-engineering', 'Unnecessary abstraction', 'Simplify the code');
+
+    const issues = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all('test-run') as any[];
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].task_id, 'task-1');
+    assert.strictEqual(issues[0].file, 'src/index.ts');
+    assert.strictEqual(issues[0].line, 42);
+    assert.strictEqual(issues[0].type, 'over-engineering');
+    assert.strictEqual(issues[0].description, 'Unnecessary abstraction');
+    assert.strictEqual(issues[0].suggestion, 'Simplify the code');
+  });
+
+  test('set_review_result allows null line number', () => {
+    const db = getDatabase();
+
+    // Insert a review issue without line number
+    db.prepare(`
+      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('test-run', 'task-1', 'src/utils.ts', null, 'dead-code', 'Unused function', 'Remove the function');
+
+    const issues = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all('test-run') as any[];
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].line, null);
+  });
 });

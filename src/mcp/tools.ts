@@ -39,9 +39,18 @@ export const AddContextSchema = z.object({
   content: z.string().describe('The context content'),
 });
 
+export const ReviewIssueSchema = z.object({
+  taskId: z.string().describe('ID of the task with the issue'),
+  file: z.string().describe('File path where the issue was found'),
+  line: z.number().optional().describe('Line number of the issue'),
+  type: z.enum(['over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code']).describe('Type of issue'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('Suggested fix'),
+});
+
 export const SetReviewResultSchema = z.object({
   passed: z.boolean().describe('Whether review passed'),
-  issues: z.array(z.string()).default([]).describe('Issues found'),
+  issues: z.array(ReviewIssueSchema).default([]).describe('Structured review issues found'),
 });
 
 export type WriteTask = z.infer<typeof WriteTaskSchema>;
@@ -51,4 +60,5 @@ export type AddPlanGroup = z.infer<typeof AddPlanGroupSchema>;
 export type UpdateLoopStatus = z.infer<typeof UpdateLoopStatusSchema>;
 export type RecordCost = z.infer<typeof RecordCostSchema>;
 export type AddContext = z.infer<typeof AddContextSchema>;
+export type ReviewIssueMCP = z.infer<typeof ReviewIssueSchema>;
 export type SetReviewResult = z.infer<typeof SetReviewResultSchema>;

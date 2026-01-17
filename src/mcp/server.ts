@@ -119,7 +119,26 @@ export function createMCPServer(runId: string) {
           type: 'object' as const,
           properties: {
             passed: { type: 'boolean', description: 'Whether review passed' },
-            issues: { type: 'array', items: { type: 'string' }, description: 'Issues found' },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  taskId: { type: 'string', description: 'ID of the task with the issue' },
+                  file: { type: 'string', description: 'File path where the issue was found' },
+                  line: { type: 'number', description: 'Line number of the issue' },
+                  type: {
+                    type: 'string',
+                    enum: ['over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code'],
+                    description: 'Type of issue',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'Suggested fix' },
+                },
+                required: ['taskId', 'file', 'type', 'description', 'suggestion'],
+              },
+              description: 'Structured review issues found',
+            },
           },
           required: ['passed'],
         },
@@ -211,18 +230,22 @@ export function createMCPServer(runId: string) {
 
       case 'set_review_result': {
         const review = SetReviewResultSchema.parse(args);
-        // Store issues as context entries
+        // Clear previous review issues for this run
+        db.prepare(`
+          DELETE FROM review_issues WHERE run_id = ?
+        `).run(runId);
+        // Store structured review issues
         for (const issue of review.issues) {
           db.prepare(`
-            INSERT INTO context_entries (run_id, entry_type, content)
-            VALUES (?, 'error', ?)
-          `).run(runId, issue);
+            INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(runId, issue.taskId, issue.file, issue.line ?? null, issue.type, issue.description, issue.suggestion);
         }
         // Update pending_review on runs
         db.prepare(`
           UPDATE runs SET pending_review = 0 WHERE id = ?
         `).run(runId);
-        return { content: [{ type: 'text', text: `Review result: ${review.passed ? 'PASSED' : 'FAILED'}` }] };
+        return { content: [{ type: 'text', text: `Review result: ${review.passed ? 'PASSED' : 'FAILED'} (${review.issues.length} issues)` }] };
       }
 
       default:

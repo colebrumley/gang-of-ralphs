@@ -77,7 +77,21 @@ CREATE TABLE IF NOT EXISTS context_entries (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Review issues: structured feedback from review phase
+CREATE TABLE IF NOT EXISTS review_issues (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  task_id TEXT NOT NULL,
+  file TEXT NOT NULL,
+  line INTEGER,
+  type TEXT NOT NULL CHECK (type IN ('over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code')),
+  description TEXT NOT NULL,
+  suggestion TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
 CREATE INDEX IF NOT EXISTS idx_phase_history_run ON phase_history(run_id);
+CREATE INDEX IF NOT EXISTS idx_review_issues_run ON review_issues(run_id);
