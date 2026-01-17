@@ -212,6 +212,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     last_error: string | null;
     last_file_change_iteration: number;
     worktree_path: string | null;
+    cost_usd: number;
   }>;
 
   const activeLoops: LoopState[] = loopRows
@@ -304,7 +305,9 @@ export function loadState(stateDir: string): OrchestratorState | null {
         conflict: 0,
         complete: 0,
       },
-      loopCosts: {},
+      loopCosts: Object.fromEntries(
+        loopRows.map(row => [row.id, row.cost_usd])
+      ),
     },
     costLimits: effortConfig.costLimits,
     maxLoops: run.max_loops,

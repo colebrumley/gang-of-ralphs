@@ -6,6 +6,7 @@ import { CONFLICT_PROMPT } from '../../agents/prompts.js';
 export interface ConflictResult {
   resolved: boolean;
   error?: string;
+  costUsd: number;
 }
 
 export async function resolveConflict(
@@ -21,6 +22,7 @@ export async function resolveConflict(
     .replace('{{taskDescription}}', `${task.title}: ${task.description}`);
 
   let output = '';
+  let costUsd = 0;
 
   try {
     for await (const message of query({
@@ -38,18 +40,22 @@ export async function resolveConflict(
           }
         }
       }
+      if (message.type === 'result') {
+        costUsd = (message as any).total_cost_usd || 0;
+      }
     }
 
     if (output.includes('CONFLICT_RESOLVED')) {
-      return { resolved: true };
+      return { resolved: true, costUsd };
     }
 
     const failMatch = output.match(/CONFLICT_FAILED:\s*(.+)/);
     return {
       resolved: false,
       error: failMatch?.[1] || 'Unknown conflict resolution failure',
+      costUsd,
     };
   } catch (e) {
-    return { resolved: false, error: String(e) };
+    return { resolved: false, error: String(e), costUsd };
   }
 }

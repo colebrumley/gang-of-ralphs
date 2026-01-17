@@ -63,10 +63,15 @@ export function parseEnumerateOutput(output: string): Task[] {
   }));
 }
 
+export interface EnumerateResult {
+  tasks: Task[];
+  costUsd: number;
+}
+
 export async function executeEnumerate(
   state: OrchestratorState,
   onOutput?: (text: string) => void
-): Promise<Task[]> {
+): Promise<EnumerateResult> {
   const specContent = await readFile(state.specPath, 'utf-8');
   const config = createAgentConfig('enumerate', process.cwd());
 
@@ -76,6 +81,7 @@ export async function executeEnumerate(
 ${specContent}`;
 
   let fullOutput = '';
+  let costUsd = 0;
 
   for await (const message of query({
     prompt,
@@ -92,7 +98,13 @@ ${specContent}`;
         }
       }
     }
+    if (message.type === 'result') {
+      costUsd = (message as any).total_cost_usd || 0;
+    }
   }
 
-  return parseEnumerateOutput(fullOutput);
+  return {
+    tasks: parseEnumerateOutput(fullOutput),
+    costUsd,
+  };
 }

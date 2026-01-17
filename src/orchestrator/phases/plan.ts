@@ -34,10 +34,15 @@ export function buildTaskGraph(tasks: Task[], parallelGroups: string[][]): TaskG
   };
 }
 
+export interface PlanResult {
+  taskGraph: TaskGraph;
+  costUsd: number;
+}
+
 export async function executePlan(
   state: OrchestratorState,
   onOutput?: (text: string) => void
-): Promise<TaskGraph> {
+): Promise<PlanResult> {
   const config = createAgentConfig('plan', process.cwd());
 
   const tasksJson = JSON.stringify(state.tasks, null, 2);
@@ -47,6 +52,7 @@ export async function executePlan(
 ${tasksJson}`;
 
   let fullOutput = '';
+  let costUsd = 0;
 
   for await (const message of query({
     prompt,
@@ -63,8 +69,14 @@ ${tasksJson}`;
         }
       }
     }
+    if (message.type === 'result') {
+      costUsd = (message as any).total_cost_usd || 0;
+    }
   }
 
   const planOutput = parsePlanOutput(fullOutput);
-  return buildTaskGraph(state.tasks, planOutput.parallelGroups);
+  return {
+    taskGraph: buildTaskGraph(state.tasks, planOutput.parallelGroups),
+    costUsd,
+  };
 }

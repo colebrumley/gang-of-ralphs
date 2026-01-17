@@ -5,6 +5,7 @@ import { BUILD_PROMPT } from '../../agents/prompts.js';
 import { LoopManager } from '../../loops/manager.js';
 import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
 import { getEffortConfig } from '../../config/effort.js';
+import { checkLoopCostLimit, formatCostExceededError } from '../../costs/index.js';
 
 export function buildPromptWithFeedback(
   task: Task,
@@ -78,6 +79,7 @@ export interface BuildResult {
     taskId: string;
     conflictFiles: string[];
   };
+  loopCosts: Record<string, number>; // loopId -> cost for this iteration
 }
 
 export async function executeBuildIteration(
@@ -89,6 +91,16 @@ export async function executeBuildIteration(
   const config = createAgentConfig('build', process.cwd());
   const effortConfig = getEffortConfig(state.effort);
 
+  // Check for loops that have exceeded cost limits
+  for (const loop of loopManager.getActiveLoops()) {
+    const costCheck = checkLoopCostLimit(loop.loopId, state.costs, state.costLimits);
+    if (costCheck.exceeded) {
+      const errorMsg = formatCostExceededError(costCheck);
+      state.context.errors.push(errorMsg);
+      loopManager.updateLoopStatus(loop.loopId, 'failed');
+    }
+  }
+
   // Check for stuck loops
   for (const loop of loopManager.getActiveLoops()) {
     const stuckResult = detectStuck(loop, { stuckThreshold: effortConfig.stuckThreshold });
@@ -99,6 +111,7 @@ export async function executeBuildIteration(
         activeLoops: loopManager.getAllLoops(),
         needsReview: true,
         stuck: true,
+        loopCosts: {},
       };
     }
   }
@@ -126,6 +139,7 @@ export async function executeBuildIteration(
     let output = '';
     let hasError = false;
     let errorMessage: string | null = null;
+    let costUsd = 0;
 
     try {
       for await (const message of query({
@@ -144,6 +158,9 @@ export async function executeBuildIteration(
             }
           }
         }
+        if (message.type === 'result') {
+          costUsd = (message as any).total_cost_usd || 0;
+        }
       }
 
       // Check for completion signal
@@ -159,6 +176,7 @@ export async function executeBuildIteration(
               loopId: loop.loopId,
               taskId: task.id,
               completed: false,
+              costUsd,
               conflict: {
                 loopId: loop.loopId,
                 taskId: task.id,
@@ -172,7 +190,7 @@ export async function executeBuildIteration(
         }
 
         loopManager.updateLoopStatus(loop.loopId, 'completed');
-        return { loopId: loop.loopId, taskId: task.id, completed: true };
+        return { loopId: loop.loopId, taskId: task.id, completed: true, costUsd };
       }
 
       // Check for stuck signal
@@ -189,11 +207,19 @@ export async function executeBuildIteration(
     loopManager.incrementIteration(loop.loopId);
     updateStuckIndicators(loop, errorMessage, !hasError);
 
-    return { loopId: loop.loopId, taskId: task.id, completed: false };
+    return { loopId: loop.loopId, taskId: task.id, completed: false, costUsd };
   });
 
   const results = await Promise.all(loopPromises);
   const newlyCompleted = results.filter(r => r.completed).map(r => r.taskId);
+
+  // Aggregate loop costs from this iteration
+  const loopCosts: Record<string, number> = {};
+  for (const result of results) {
+    if ('costUsd' in result) {
+      loopCosts[result.loopId] = result.costUsd;
+    }
+  }
 
   // Check for conflicts - return first one found for orchestrator to handle
   const conflictResult = results.find(r => 'conflict' in r && r.conflict);
@@ -204,6 +230,7 @@ export async function executeBuildIteration(
       needsReview: false,
       stuck: false,
       pendingConflict: conflictResult.conflict,
+      loopCosts,
     };
   }
 
@@ -217,5 +244,6 @@ export async function executeBuildIteration(
     activeLoops: loopManager.getAllLoops(),
     needsReview,
     stuck: false,
+    loopCosts,
   };
 }

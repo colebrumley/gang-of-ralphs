@@ -7,6 +7,13 @@ export interface ReviewResult {
   passed: boolean;
   issues: ReviewIssue[];
   suggestions: string[];
+  costUsd: number;
+}
+
+interface ParsedReviewOutput {
+  passed: boolean;
+  issues: ReviewIssue[];
+  suggestions: string[];
 }
 
 function normalizeIssue(issue: unknown): ReviewIssue {
@@ -33,7 +40,7 @@ function normalizeIssue(issue: unknown): ReviewIssue {
   };
 }
 
-export function parseReviewOutput(output: string): ReviewResult {
+export function parseReviewOutput(output: string): ParsedReviewOutput {
   const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ||
                     output.match(/(\{[\s\S]*"passed"[\s\S]*\})/);
 
@@ -180,6 +187,7 @@ ${context}
 File: ${state.specPath}`;
 
   let fullOutput = '';
+  let costUsd = 0;
 
   for await (const message of query({
     prompt,
@@ -196,7 +204,14 @@ File: ${state.specPath}`;
         }
       }
     }
+    if (message.type === 'result') {
+      costUsd = (message as any).total_cost_usd || 0;
+    }
   }
 
-  return parseReviewOutput(fullOutput);
+  const parsed = parseReviewOutput(fullOutput);
+  return {
+    ...parsed,
+    costUsd,
+  };
 }

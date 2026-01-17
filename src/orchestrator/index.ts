@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { OrchestratorState, Phase } from '../types/index.js';
+import type { OrchestratorState, Phase, CostTracking } from '../types/index.js';
 import { getEffortConfig } from '../config/effort.js';
 import { LoopManager } from '../loops/manager.js';
 import { WorktreeManager } from '../worktrees/manager.js';
@@ -8,6 +8,23 @@ import { executePlan } from './phases/plan.js';
 import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
 import { executeReview } from './phases/review.js';
 import { resolveConflict } from './phases/conflict.js';
+import { checkRunCostLimit, formatCostExceededError } from '../costs/index.js';
+
+/**
+ * Update cost tracking state with new costs from a phase or loop execution.
+ */
+function updateCosts(
+  costs: CostTracking,
+  phase: Phase,
+  costUsd: number,
+  loopId?: string
+): void {
+  costs.totalCostUsd += costUsd;
+  costs.phaseCosts[phase] = (costs.phaseCosts[phase] || 0) + costUsd;
+  if (loopId) {
+    costs.loopCosts[loopId] = (costs.loopCosts[loopId] || 0) + costUsd;
+  }
+}
 
 export interface OrchestratorCallbacks {
   onPhaseStart?: (phase: Phase) => void;
@@ -22,18 +39,35 @@ export async function runOrchestrator(
 ): Promise<OrchestratorState> {
   const effortConfig = getEffortConfig(state.effort);
 
+  // Check run cost limit before executing any phase
+  const runCostCheck = checkRunCostLimit(state.costs, state.costLimits);
+  if (runCostCheck.exceeded) {
+    const errorMsg = formatCostExceededError(runCostCheck);
+    state.context.errors.push(errorMsg);
+    state.phaseHistory.push({
+      phase: state.phase,
+      success: false,
+      timestamp: new Date().toISOString(),
+      summary: errorMsg,
+    });
+    state.phase = 'complete';
+    callbacks.onPhaseComplete?.(state.phase, false);
+    return state;
+  }
+
   callbacks.onPhaseStart?.(state.phase);
 
   try {
     switch (state.phase) {
       case 'enumerate': {
-        const tasks = await executeEnumerate(state, callbacks.onOutput);
-        state.tasks = tasks;
+        const result = await executeEnumerate(state, callbacks.onOutput);
+        state.tasks = result.tasks;
+        updateCosts(state.costs, 'enumerate', result.costUsd);
         state.phaseHistory.push({
           phase: 'enumerate',
           success: true,
           timestamp: new Date().toISOString(),
-          summary: `Enumerated ${tasks.length} tasks`,
+          summary: `Enumerated ${result.tasks.length} tasks`,
         });
 
         // Check if we need to review
@@ -48,13 +82,14 @@ export async function runOrchestrator(
       }
 
       case 'plan': {
-        const taskGraph = await executePlan(state, callbacks.onOutput);
-        state.taskGraph = taskGraph;
+        const result = await executePlan(state, callbacks.onOutput);
+        state.taskGraph = result.taskGraph;
+        updateCosts(state.costs, 'plan', result.costUsd);
         state.phaseHistory.push({
           phase: 'plan',
           success: true,
           timestamp: new Date().toISOString(),
-          summary: `Created plan with ${taskGraph.parallelGroups.length} parallel groups`,
+          summary: `Created plan with ${result.taskGraph.parallelGroups.length} parallel groups`,
         });
 
         if (effortConfig.reviewAfterPlan) {
@@ -98,6 +133,11 @@ export async function runOrchestrator(
         state.completedTasks = result.completedTasks;
         state.activeLoops = result.activeLoops;
 
+        // Track costs from each loop in this iteration
+        for (const [loopId, costUsd] of Object.entries(result.loopCosts)) {
+          updateCosts(state.costs, 'build', costUsd, loopId);
+        }
+
         if (result.pendingConflict) {
           // Merge conflict detected - transition to conflict phase
           state.pendingConflict = result.pendingConflict;
@@ -125,6 +165,7 @@ export async function runOrchestrator(
           effortConfig.reviewDepth,
           callbacks.onOutput
         );
+        updateCosts(state.costs, 'review', result.costUsd);
 
         state.phaseHistory.push({
           phase: 'review',
@@ -198,6 +239,7 @@ export async function runOrchestrator(
           state.stateDir,
           callbacks.onOutput
         );
+        updateCosts(state.costs, 'conflict', result.costUsd, loopId);
 
         state.phaseHistory.push({
           phase: 'conflict',
