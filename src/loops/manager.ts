@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Task, LoopState } from '../types/index.js';
+import type { WorktreeManager } from '../worktrees/manager.js';
 
 export interface LoopManagerConfig {
   maxLoops: number;
@@ -10,13 +11,23 @@ export interface LoopManagerConfig {
 export class LoopManager {
   private loops: Map<string, LoopState> = new Map();
   private config: LoopManagerConfig;
+  private worktreeManager: WorktreeManager | null;
 
-  constructor(config: LoopManagerConfig) {
+  constructor(config: LoopManagerConfig, worktreeManager?: WorktreeManager) {
     this.config = config;
+    this.worktreeManager = worktreeManager ?? null;
   }
 
-  createLoop(taskIds: string[], tasks: Task[]): LoopState {
+  async createLoop(taskIds: string[], tasks: Task[]): Promise<LoopState> {
     const loopId = randomUUID();
+    let worktreePath: string | null = null;
+
+    // Create worktree if manager is configured
+    if (this.worktreeManager) {
+      const result = await this.worktreeManager.create(loopId);
+      worktreePath = result.worktreePath;
+    }
+
     const loop: LoopState = {
       loopId,
       taskIds,
@@ -32,6 +43,7 @@ export class LoopManager {
         lastFileChangeIteration: 0,
       },
       output: [],
+      worktreePath,
     };
 
     this.loops.set(loopId, loop);
@@ -44,6 +56,10 @@ export class LoopManager {
     }
 
     return loop;
+  }
+
+  getWorktreeManager(): WorktreeManager | null {
+    return this.worktreeManager;
   }
 
   canSpawnMore(): boolean {
