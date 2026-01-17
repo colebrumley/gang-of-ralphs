@@ -1,69 +1,79 @@
-# Claude Squad (sq)
+# Claude Squad
 
-An AI orchestrator that coordinates multiple Claude Code agents to implement software from specifications. Give it a spec, and it breaks it into tasks, plans execution order, spawns parallel agents, and manages the entire workflow.
+An AI orchestration system that coordinates multiple Claude Code agents to implement software from specifications. Give it a spec file, and it breaks the work into tasks, plans execution order, spawns parallel agents in isolated git worktrees, and merges the results.
+
+## Why Claude Squad?
+
+- **Parallel execution** - Multiple agents work simultaneously on independent tasks
+- **Git isolation** - Each agent works in its own worktree, preventing conflicts
+- **Automatic conflict resolution** - When merges conflict, a dedicated agent resolves them
+- **Quality control** - Built-in review phases validate work against the original spec
+- **Stateless orchestration** - Resume interrupted runs; state persists to SQLite
+
+## Quick Start
+
+```bash
+# Clone and build
+git clone https://github.com/colebrumley/claude-squad.git
+cd claude-squad
+npm install && npm run build
+npm link  # Creates global 'sq' command
+
+# Run on a spec file
+sq --spec feature.md --effort medium --tui
+```
 
 ## Installation
 
 ```bash
+git clone https://github.com/colebrumley/claude-squad.git
+cd claude-squad
 npm install
 npm run build
+npm link  # Creates global 'sq' command
 ```
 
-## Quick Start
+### Prerequisites
 
-1. Write a spec file describing what you want to build:
+- Node.js 20+
+- Git (for worktree isolation)
+- Claude Code CLI configured with API access
 
-```markdown
-# User Authentication
-
-Add user authentication to the application.
-
-## Requirements
-
-1. Create a User model with email and password fields
-2. Add password hashing with bcrypt
-3. Create login and registration API endpoints
-4. Add JWT token generation and validation
-5. Write tests for all authentication flows
-```
-
-2. Run sq:
+## Usage
 
 ```bash
-./bin/sq --spec auth-spec.md --effort medium --tui
+sq --spec <path> [options]
 ```
 
-3. Watch as sq:
-   - Enumerates discrete tasks from your spec
-   - Plans execution order based on dependencies
-   - Spawns parallel agents to implement each task
-   - Merges changes and resolves conflicts
-   - Reviews the completed work
+### Options
 
-## Writing Specs
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--spec <path>` | Path to spec file (required) | - |
+| `--effort <level>` | Quality level: `low`, `medium`, `high`, `max` | `medium` |
+| `--tui` | Show terminal UI with live progress | off |
+| `--dry-run` | Preview tasks and plan without executing | off |
+| `--no-worktrees` | Disable git worktree isolation | off |
+| `--resume` | Resume an interrupted run | off |
+| `--reset` | Discard state and start fresh | off |
+| `--max-loops <n>` | Max concurrent parallel agents | 4 |
+| `--max-iterations <n>` | Max iterations per agent loop | 20 |
+| `--state-dir <path>` | State directory | `.sq` |
 
-Specs are markdown files that describe what you want built. Good specs include:
-
-- **Clear requirements** - Numbered list of discrete features
-- **File locations** - Where code should go (e.g., "Create `src/auth/login.ts`")
-- **Dependencies** - What existing code to integrate with
-- **Test expectations** - What tests should verify
-
-See `examples/` for sample specs.
-
-## CLI Options
+### Examples
 
 ```bash
-./bin/sq --spec <path>              # Required: path to spec file
-         --effort <level>           # low|medium|high|max (default: medium)
-         --max-loops <n>            # Max concurrent parallel agents (default: 4)
-         --max-iterations <n>       # Max iterations per agent loop (default: 20)
-         --state-dir <path>         # State directory (default: .sq/)
-         --resume                   # Resume existing run
-         --reset                    # Discard state, start fresh
-         --dry-run                  # Preview what would happen
-         --tui                      # Enable terminal UI
-         --no-worktrees             # Disable git worktree isolation
+# Preview what would happen
+sq --spec feature.md --dry-run
+
+# Run with live UI
+sq --spec feature.md --effort high --tui
+
+# Simple single-agent run (no worktrees)
+sq --spec bugfix.md --no-worktrees
+
+# Resume after interruption
+sq --spec feature.md --resume
 ```
 
 ## Effort Levels
@@ -79,27 +89,53 @@ The `--effort` flag controls how thoroughly sq reviews work:
 
 Higher effort means more thorough validation but longer execution time.
 
+## Writing Specs
+
+Specs are markdown files describing what to build. See [docs/writing-specs.md](docs/writing-specs.md) for the full guide.
+
+Good specs include:
+- **Clear requirements** - Numbered list of discrete features
+- **File locations** - Where code should go (e.g., "Create `src/auth/login.ts`")
+- **Dependencies** - What existing code to integrate with
+- **Test expectations** - What tests should verify
+
+Minimal example:
+
+```markdown
+# Greeting Module
+
+Create a greeting utility.
+
+## Requirements
+
+1. Create `src/greet.ts` with a `greet(name: string)` function
+2. Return "Hello, {name}!" for valid names
+3. Return "Hello, World!" for empty string
+4. Add tests in `src/greet.test.ts`
+```
+
+See `examples/` for more sample specs.
+
 ## TUI Mode
 
-Run with `--tui` for a multi-column terminal interface showing:
+Run with `--tui` for a terminal interface showing:
 
 - Overall progress and current phase
 - Active agent loops with their tasks
 - Streaming output from each agent
-- Keyboard shortcuts for control
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Claude Squad │ phase: BUILD │ effort: medium │ loops: 2/4 │ tasks: 3/8 │
-├───────────────────────┬─────────────────────────────────────────────┤
-│ Loop 1: auth          │ Loop 2: api                                 │
-│ task: password hash   │ task: create endpoints                      │
-│ iter: 3/20 ✓ passing  │ iter: 5/20 ⟳ running                        │
-├───────────────────────┼─────────────────────────────────────────────┤
-│ > Adding bcrypt...    │ > Writing POST /login handler...            │
-│ > Updating User model │ > Adding validation middleware              │
-└───────────────────────┴─────────────────────────────────────────────┘
-```
+## How It Works
+
+sq operates as a state machine with these phases:
+
+1. **Enumerate** - Reads your spec and breaks it into discrete tasks
+2. **Plan** - Analyzes dependencies and groups tasks for parallel execution
+3. **Build** - Spawns Claude Code agents to implement each task
+4. **Conflict** - Resolves any merge conflicts between parallel agents
+5. **Review** - Validates completed work (depth depends on effort level)
+6. **Revise** - Re-enters BUILD if review finds issues
+
+The orchestrator is stateless per invocation - it loads state, executes one phase step, saves state, and exits. An outer loop continuously restarts it until completion.
 
 ## Git Worktree Isolation
 
@@ -108,15 +144,6 @@ By default, parallel agents work in isolated git worktrees to prevent conflicts.
 When agents complete, their changes merge back to the base branch. If conflicts occur, sq spawns a dedicated agent to resolve them.
 
 Disable with `--no-worktrees` for simpler single-agent runs or when git isolation isn't needed.
-
-## Cleanup
-
-sq creates worktrees and branches that persist after runs. Clean them up with:
-
-```bash
-./bin/sq clean --all            # Remove all sq worktrees and branches
-./bin/sq clean --run <id>       # Remove worktrees for a specific run
-```
 
 ## State and Resume
 
@@ -128,32 +155,12 @@ sq saves state to `.sq/` between invocations. This enables:
 
 Use `--reset` to discard state and start fresh.
 
-## Dry Run
-
-Preview what sq would do without actually spawning agents:
+## Cleanup
 
 ```bash
-./bin/sq --spec feature.md --dry-run
+sq clean --all              # Remove all sq worktrees and branches
+sq clean --run <id>         # Remove worktrees for a specific run
 ```
-
-This runs ENUMERATE and PLAN phases, then prints:
-- Tasks that would be created
-- Dependency relationships
-- Planned execution groups
-- Estimated agent spawns
-
-## How It Works
-
-sq operates as a state machine with these phases:
-
-1. **ENUMERATE** - Reads your spec and breaks it into discrete tasks
-2. **PLAN** - Analyzes dependencies and groups tasks for parallel execution
-3. **BUILD** - Spawns Claude Code agents to implement each task
-4. **CONFLICT** - Resolves any merge conflicts between parallel agents
-5. **REVIEW** - Validates completed work (depth depends on effort level)
-6. **REVISE** - Re-enters BUILD if review finds issues
-
-The orchestrator is stateless per invocation - it loads state, executes one phase step, saves state, and exits. An outer loop continuously restarts it until completion.
 
 ## License
 

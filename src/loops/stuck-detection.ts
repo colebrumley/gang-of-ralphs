@@ -39,7 +39,10 @@ export function detectStuck(loop: LoopState, config: StuckConfig): StuckResult |
 
   // Check no file changes (no progress)
   const iterationsSinceChange = iteration - stuckIndicators.lastFileChangeIteration;
-  if (stuckIndicators.noProgressCount >= config.stuckThreshold || iterationsSinceChange >= config.stuckThreshold + 2) {
+  if (
+    stuckIndicators.noProgressCount >= config.stuckThreshold ||
+    iterationsSinceChange >= config.stuckThreshold + 2
+  ) {
     return {
       reason: StuckReason.NO_PROGRESS,
       details: `No file changes in ${iterationsSinceChange} iterations`,

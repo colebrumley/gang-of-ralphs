@@ -1,13 +1,37 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { getNextParallelGroup, canStartGroup, buildPromptWithFeedback } from './build.js';
-import type { Task, TaskGraph, ReviewIssue } from '../../types/index.js';
+import { describe, test } from 'node:test';
+import type { ReviewIssue, Task, TaskGraph } from '../../types/index.js';
+import { buildPromptWithFeedback, canStartGroup, getNextParallelGroup } from './build.js';
 
 describe('Build Phase', () => {
   const tasks: Task[] = [
-    { id: 't1', title: 'Task 1', description: '', status: 'pending', dependencies: [], estimatedIterations: 5, assignedLoopId: null },
-    { id: 't2', title: 'Task 2', description: '', status: 'pending', dependencies: [], estimatedIterations: 5, assignedLoopId: null },
-    { id: 't3', title: 'Task 3', description: '', status: 'pending', dependencies: ['t1', 't2'], estimatedIterations: 5, assignedLoopId: null },
+    {
+      id: 't1',
+      title: 'Task 1',
+      description: '',
+      status: 'pending',
+      dependencies: [],
+      estimatedIterations: 5,
+      assignedLoopId: null,
+    },
+    {
+      id: 't2',
+      title: 'Task 2',
+      description: '',
+      status: 'pending',
+      dependencies: [],
+      estimatedIterations: 5,
+      assignedLoopId: null,
+    },
+    {
+      id: 't3',
+      title: 'Task 3',
+      description: '',
+      status: 'pending',
+      dependencies: ['t1', 't2'],
+      estimatedIterations: 5,
+      assignedLoopId: null,
+    },
   ];
 
   const graph: TaskGraph = {

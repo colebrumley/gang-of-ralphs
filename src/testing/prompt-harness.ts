@@ -1,5 +1,5 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { extractJSON, JSONExtractionError } from '../utils/json-parser.js';
+import { extractJSON } from '../utils/json-parser.js';
 
 export interface PromptTestResult {
   promptName: string;
@@ -134,8 +134,7 @@ export async function runAllPromptTests(
     printTestReport(result);
   }
 
-  const overallSuccessRate =
-    results.reduce((a, r) => a + r.successRate, 0) / results.length;
+  const overallSuccessRate = results.reduce((a, r) => a + r.successRate, 0) / results.length;
 
   return {
     results,

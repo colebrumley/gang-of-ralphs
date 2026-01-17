@@ -1,5 +1,5 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
+import { describe, test } from 'node:test';
 import { createAgentConfig } from './spawn.js';
 
 describe('Agent Spawning', () => {

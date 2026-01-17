@@ -20,10 +20,7 @@ export type CostCheckResult = CostExceededResult | CostWithinLimitResult;
 /**
  * Check if the total run cost exceeds the per-run limit.
  */
-export function checkRunCostLimit(
-  costs: CostTracking,
-  limits: CostLimits
-): CostCheckResult {
+export function checkRunCostLimit(costs: CostTracking, limits: CostLimits): CostCheckResult {
   if (costs.totalCostUsd >= limits.perRunMaxUsd) {
     return {
       exceeded: true,

@@ -1,7 +1,7 @@
-import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { printDryRunSummary } from './summary.js';
+import { describe, it } from 'node:test';
 import type { OrchestratorState } from '../types/index.js';
+import { printDryRunSummary } from './summary.js';
 
 describe('Dry Run Summary', () => {
   it('prints summary without errors for valid state', () => {

@@ -1,18 +1,26 @@
-import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { LoopManager } from './manager.js';
-import { WorktreeManager } from '../worktrees/manager.js';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import type { Task } from '../types/index.js';
+import { WorktreeManager } from '../worktrees/manager.js';
+import { LoopManager } from './manager.js';
 
 describe('Loop Manager', () => {
   test('createLoop initializes loop with correct state', async () => {
     const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
     const tasks: Task[] = [
-      { id: 't1', title: 'Task 1', description: '', status: 'pending', dependencies: [], estimatedIterations: 5, assignedLoopId: null }
+      {
+        id: 't1',
+        title: 'Task 1',
+        description: '',
+        status: 'pending',
+        dependencies: [],
+        estimatedIterations: 5,
+        assignedLoopId: null,
+      },
     ];
 
     const loop = await manager.createLoop(['t1'], tasks);
@@ -66,6 +74,7 @@ describe('Loop Manager', () => {
       },
       output: ['line1', 'line2'],
       worktreePath: '/path/to/worktree',
+      phase: 'build',
     };
 
     manager.restoreLoop(persistedLoop);
@@ -95,7 +104,10 @@ describe('LoopManager with worktrees', () => {
   beforeEach(() => {
     testDir = mkdtempSync(join(tmpdir(), 'sq-loop-wt-test-'));
     repoDir = join(testDir, 'repo');
-    execSync(`mkdir -p ${repoDir} && cd ${repoDir} && git init && git commit --allow-empty -m "init"`, { stdio: 'pipe' });
+    execSync(
+      `mkdir -p ${repoDir} && cd ${repoDir} && git init && git commit --allow-empty -m "init"`,
+      { stdio: 'pipe' }
+    );
 
     worktreeManager = new WorktreeManager({
       repoDir,
@@ -104,11 +116,14 @@ describe('LoopManager with worktrees', () => {
       runId: 'test-run',
     });
 
-    loopManager = new LoopManager({
-      maxLoops: 4,
-      maxIterations: 20,
-      reviewInterval: 5,
-    }, worktreeManager);
+    loopManager = new LoopManager(
+      {
+        maxLoops: 4,
+        maxIterations: 20,
+        reviewInterval: 5,
+      },
+      worktreeManager
+    );
   });
 
   afterEach(() => {
@@ -117,7 +132,15 @@ describe('LoopManager with worktrees', () => {
 
   test('creates worktree when creating loop', async () => {
     const tasks: Task[] = [
-      { id: 'task-1', title: 'Test', description: '', status: 'pending', dependencies: [], estimatedIterations: 10, assignedLoopId: null }
+      {
+        id: 'task-1',
+        title: 'Test',
+        description: '',
+        status: 'pending',
+        dependencies: [],
+        estimatedIterations: 10,
+        assignedLoopId: null,
+      },
     ];
     const loop = await loopManager.createLoop(['task-1'], tasks);
 

@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp, useInput } from 'ink';
-import type { OrchestratorState, LoopState } from '../types/index.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { closeDatabase } from '../db/index.js';
 import { runOrchestrator } from '../orchestrator/index.js';
 import { saveRun } from '../state/index.js';
-import { closeDatabase } from '../db/index.js';
+import type { LoopState, OrchestratorState } from '../types/index.js';
 import { Layout } from './Layout.js';
 
 interface AppProps {
@@ -57,7 +57,7 @@ export function App({ initialState }: AppProps) {
       exit();
     }
     if (input === 'p') {
-      setRunning(prev => !prev);
+      setRunning((prev) => !prev);
     }
   });
 
@@ -66,11 +66,11 @@ export function App({ initialState }: AppProps) {
 
     const newState = await runOrchestrator(state, {
       onLoopOutput: (loopId, text) => {
-        setLoops(prev => prev.map(l =>
-          l.loopId === loopId
-            ? { ...l, output: [...l.output.slice(-99), text] }
-            : l
-        ));
+        setLoops((prev) =>
+          prev.map((l) =>
+            l.loopId === loopId ? { ...l, output: [...l.output.slice(-99), text] } : l
+          )
+        );
       },
     });
 

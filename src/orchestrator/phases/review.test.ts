@@ -1,6 +1,6 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { parseReviewOutput, getReviewPrompt } from './review.js';
+import { describe, test } from 'node:test';
+import { getReviewPrompt, parseReviewOutput } from './review.js';
 
 describe('Review Phase', () => {
   test('parseReviewOutput extracts passed status', () => {
@@ -46,8 +46,14 @@ describe('Review Phase', () => {
   test('getReviewPrompt includes quality checks at standard depth', () => {
     const prompt = getReviewPrompt('standard');
 
-    assert.ok(prompt.includes('abstraction') || prompt.includes('over-engineer'), 'Should check for over-engineering');
-    assert.ok(prompt.includes('error handling') || prompt.includes('unhandled'), 'Should check error handling');
+    assert.ok(
+      prompt.includes('abstraction') || prompt.includes('over-engineer'),
+      'Should check for over-engineering'
+    );
+    assert.ok(
+      prompt.includes('error handling') || prompt.includes('unhandled'),
+      'Should check error handling'
+    );
   });
 
   test('getReviewPrompt requests structured issues', () => {
@@ -55,7 +61,10 @@ describe('Review Phase', () => {
 
     assert.ok(prompt.includes('file'), 'Should request file location');
     assert.ok(prompt.includes('line') || prompt.includes('location'), 'Should request line number');
-    assert.ok(prompt.includes('suggestion') || prompt.includes('fix'), 'Should request fix suggestion');
+    assert.ok(
+      prompt.includes('suggestion') || prompt.includes('fix'),
+      'Should request fix suggestion'
+    );
   });
 
   test('parseReviewOutput extracts structured issues', () => {

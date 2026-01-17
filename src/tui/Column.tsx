@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Text } from 'ink';
 import type { LoopState } from '../types/index.js';
 
@@ -9,11 +8,16 @@ interface ColumnProps {
 
 function getStatusIndicator(status: LoopState['status']): { symbol: string; color: string } {
   switch (status) {
-    case 'running': return { symbol: '⟳', color: 'yellow' };
-    case 'completed': return { symbol: '✓', color: 'green' };
-    case 'failed': return { symbol: '✗', color: 'red' };
-    case 'stuck': return { symbol: '!', color: 'red' };
-    default: return { symbol: '○', color: 'gray' };
+    case 'running':
+      return { symbol: '⟳', color: 'yellow' };
+    case 'completed':
+      return { symbol: '✓', color: 'green' };
+    case 'failed':
+      return { symbol: '✗', color: 'red' };
+    case 'stuck':
+      return { symbol: '!', color: 'red' };
+    default:
+      return { symbol: '○', color: 'gray' };
   }
 }
 
@@ -37,7 +41,9 @@ export function Column({ loop, taskTitle }: ColumnProps) {
       {/* Status */}
       <Box paddingX={1}>
         <Text dimColor>iter: </Text>
-        <Text>{loop.iteration}/{loop.maxIterations}</Text>
+        <Text>
+          {loop.iteration}/{loop.maxIterations}
+        </Text>
         <Text> </Text>
         <Text color={status.color}>{status.symbol}</Text>
         <Text> </Text>
@@ -59,7 +65,9 @@ export function Column({ loop, taskTitle }: ColumnProps) {
       {/* Output */}
       <Box flexDirection="column" paddingX={1} flexGrow={1}>
         {recentOutput.map((line, i) => (
-          <Text key={i} wrap="truncate">{line.slice(0, 30)}</Text>
+          <Text key={i} wrap="truncate">
+            {line.slice(0, 30)}
+          </Text>
         ))}
       </Box>
     </Box>

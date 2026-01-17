@@ -1,11 +1,22 @@
+import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { OrchestratorState, Task, TaskGraph, LoopState, ReviewIssue } from '../../types/index.js';
-import { createAgentConfig } from '../../agents/spawn.js';
 import { BUILD_PROMPT } from '../../agents/prompts.js';
-import { LoopManager } from '../../loops/manager.js';
-import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
+import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig } from '../../config/effort.js';
-import { checkLoopCostLimit, formatCostExceededError } from '../../costs/index.js';
+import {
+  checkLoopCostLimit,
+  checkPhaseCostLimit,
+  formatCostExceededError,
+} from '../../costs/index.js';
+import type { LoopManager } from '../../loops/manager.js';
+import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
+import type {
+  LoopState,
+  OrchestratorState,
+  ReviewIssue,
+  Task,
+  TaskGraph,
+} from '../../types/index.js';
 
 export function buildPromptWithFeedback(
   task: Task,
@@ -16,11 +27,11 @@ export function buildPromptWithFeedback(
   let prompt = '';
 
   // Filter issues for this task
-  const relevantIssues = reviewIssues.filter(i => i.taskId === task.id);
+  const relevantIssues = reviewIssues.filter((i) => i.taskId === task.id);
 
   if (relevantIssues.length > 0) {
-    prompt += `## Previous Review Feedback\n`;
-    prompt += `Your last implementation had these issues. Fix them:\n\n`;
+    prompt += '## Previous Review Feedback\n';
+    prompt += 'Your last implementation had these issues. Fix them:\n\n';
     for (const issue of relevantIssues) {
       const location = issue.line ? `${issue.file}:${issue.line}` : issue.file;
       prompt += `- **${location}** (${issue.type}): ${issue.description}\n`;
@@ -40,15 +51,12 @@ Description: ${task.description}
   return prompt;
 }
 
-export function getNextParallelGroup(
-  graph: TaskGraph,
-  completedTasks: string[]
-): string[] | null {
+export function getNextParallelGroup(graph: TaskGraph, completedTasks: string[]): string[] | null {
   for (const group of graph.parallelGroups) {
-    const allComplete = group.every(id => completedTasks.includes(id));
+    const allComplete = group.every((id) => completedTasks.includes(id));
     if (!allComplete) {
       // Return tasks from this group that aren't complete
-      return group.filter(id => !completedTasks.includes(id));
+      return group.filter((id) => !completedTasks.includes(id));
     }
   }
   return null;
@@ -60,10 +68,10 @@ export function canStartGroup(
   allTasks: Task[]
 ): boolean {
   for (const taskId of taskIds) {
-    const task = allTasks.find(t => t.id === taskId);
+    const task = allTasks.find((t) => t.id === taskId);
     if (!task) continue;
 
-    const depsComplete = task.dependencies.every(dep => completedTasks.includes(dep));
+    const depsComplete = task.dependencies.every((dep) => completedTasks.includes(dep));
     if (!depsComplete) return false;
   }
   return true;
@@ -88,8 +96,26 @@ export async function executeBuildIteration(
   onLoopOutput?: (loopId: string, text: string) => void
 ): Promise<BuildResult> {
   const graph = state.taskGraph!;
-  const config = createAgentConfig('build', process.cwd());
+  const dbPath = join(state.stateDir, 'state.db');
   const effortConfig = getEffortConfig(state.effort);
+
+  // Check if build phase has exceeded its cost limit
+  const phaseCostCheck = checkPhaseCostLimit('build', state.costs, state.costLimits);
+  if (phaseCostCheck.exceeded) {
+    const errorMsg = formatCostExceededError(phaseCostCheck);
+    state.context.errors.push(errorMsg);
+    // Mark all active loops as failed due to phase cost limit
+    for (const loop of loopManager.getActiveLoops()) {
+      loopManager.updateLoopStatus(loop.loopId, 'failed');
+    }
+    return {
+      completedTasks: state.completedTasks,
+      activeLoops: loopManager.getAllLoops(),
+      needsReview: false,
+      stuck: true,
+      loopCosts: {},
+    };
+  }
 
   // Check for loops that have exceeded cost limits
   for (const loop of loopManager.getActiveLoops()) {
@@ -128,13 +154,17 @@ export async function executeBuildIteration(
 
   // Execute one iteration for each active loop
   const loopPromises = loopManager.getActiveLoops().map(async (loop) => {
-    const task = state.tasks.find(t => t.id === loop.taskIds[0])!;
+    const task = state.tasks.find((t) => t.id === loop.taskIds[0])!;
     const prompt = buildPromptWithFeedback(
       task,
       state.context.reviewIssues ?? [],
       loop.iteration + 1,
       loop.maxIterations
     );
+
+    // Use worktree path if available, otherwise fall back to process.cwd()
+    const loopCwd = loop.worktreePath || process.cwd();
+    const config = createAgentConfig('build', loopCwd, state.runId, dbPath);
 
     let output = '';
     let hasError = false;
@@ -145,6 +175,7 @@ export async function executeBuildIteration(
       for await (const message of query({
         prompt,
         options: {
+          cwd: loopCwd,
           allowedTools: config.allowedTools,
           maxTurns: 10, // Single iteration limit
         },
@@ -211,7 +242,7 @@ export async function executeBuildIteration(
   });
 
   const results = await Promise.all(loopPromises);
-  const newlyCompleted = results.filter(r => r.completed).map(r => r.taskId);
+  const newlyCompleted = results.filter((r) => r.completed).map((r) => r.taskId);
 
   // Aggregate loop costs from this iteration
   const loopCosts: Record<string, number> = {};
@@ -222,7 +253,7 @@ export async function executeBuildIteration(
   }
 
   // Check for conflicts - return first one found for orchestrator to handle
-  const conflictResult = results.find(r => 'conflict' in r && r.conflict);
+  const conflictResult = results.find((r) => 'conflict' in r && r.conflict);
   if (conflictResult && 'conflict' in conflictResult && conflictResult.conflict) {
     return {
       completedTasks: [...state.completedTasks, ...newlyCompleted],
@@ -235,9 +266,9 @@ export async function executeBuildIteration(
   }
 
   // Check if any loop needs review
-  const needsReview = loopManager.getActiveLoops().some(loop =>
-    loopManager.needsReview(loop.loopId)
-  );
+  const needsReview = loopManager
+    .getActiveLoops()
+    .some((loop) => loopManager.needsReview(loop.loopId));
 
   return {
     completedTasks: [...state.completedTasks, ...newlyCompleted],

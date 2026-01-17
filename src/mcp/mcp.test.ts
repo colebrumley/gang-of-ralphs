@@ -1,9 +1,9 @@
-import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDatabase, closeDatabase, getDatabase } from '../db/index.js';
+import { afterEach, beforeEach, describe, test } from 'node:test';
+import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
 import { createMCPServer } from './server.js';
 
 describe('MCP Server', () => {
@@ -14,9 +14,11 @@ describe('MCP Server', () => {
     createDatabase(join(tempDir, 'state.db'));
 
     // Create a test run
-    getDatabase().prepare(`
+    getDatabase()
+      .prepare(`
       INSERT INTO runs (id, spec_path, effort) VALUES (?, ?, ?)
-    `).run('test-run', '/spec.md', 'medium');
+    `)
+      .run('test-run', '/spec.md', 'medium');
   });
 
   afterEach(async () => {
@@ -66,7 +68,9 @@ describe('MCP Server', () => {
       VALUES (?, ?, ?)
     `).run('test-run', 0, '["task-1", "task-2"]');
 
-    const groups = db.prepare('SELECT * FROM plan_groups WHERE run_id = ?').all('test-run') as any[];
+    const groups = db
+      .prepare('SELECT * FROM plan_groups WHERE run_id = ?')
+      .all('test-run') as any[];
     assert.strictEqual(groups.length, 1);
     assert.strictEqual(groups[0].group_index, 0);
     assert.deepStrictEqual(JSON.parse(groups[0].task_ids), ['task-1', 'task-2']);
@@ -80,7 +84,9 @@ describe('MCP Server', () => {
       VALUES (?, ?, ?)
     `).run('test-run', 'discovery', 'Found existing pattern');
 
-    const entries = db.prepare('SELECT * FROM context_entries WHERE run_id = ?').all('test-run') as any[];
+    const entries = db
+      .prepare('SELECT * FROM context_entries WHERE run_id = ?')
+      .all('test-run') as any[];
     assert.strictEqual(entries.length, 1);
     assert.strictEqual(entries[0].entry_type, 'discovery');
     assert.strictEqual(entries[0].content, 'Found existing pattern');
@@ -93,9 +99,19 @@ describe('MCP Server', () => {
     db.prepare(`
       INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('test-run', 'task-1', 'src/index.ts', 42, 'over-engineering', 'Unnecessary abstraction', 'Simplify the code');
+    `).run(
+      'test-run',
+      'task-1',
+      'src/index.ts',
+      42,
+      'over-engineering',
+      'Unnecessary abstraction',
+      'Simplify the code'
+    );
 
-    const issues = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all('test-run') as any[];
+    const issues = db
+      .prepare('SELECT * FROM review_issues WHERE run_id = ?')
+      .all('test-run') as any[];
     assert.strictEqual(issues.length, 1);
     assert.strictEqual(issues[0].task_id, 'task-1');
     assert.strictEqual(issues[0].file, 'src/index.ts');
@@ -112,9 +128,19 @@ describe('MCP Server', () => {
     db.prepare(`
       INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('test-run', 'task-1', 'src/utils.ts', null, 'dead-code', 'Unused function', 'Remove the function');
+    `).run(
+      'test-run',
+      'task-1',
+      'src/utils.ts',
+      null,
+      'dead-code',
+      'Unused function',
+      'Remove the function'
+    );
 
-    const issues = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all('test-run') as any[];
+    const issues = db
+      .prepare('SELECT * FROM review_issues WHERE run_id = ?')
+      .all('test-run') as any[];
     assert.strictEqual(issues.length, 1);
     assert.strictEqual(issues[0].line, null);
   });

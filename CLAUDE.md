@@ -8,19 +8,36 @@ Claude Squad is an AI orchestration system that coordinates multiple Claude Code
 
 **Key design**: The orchestrator is stateless per invocation. It loads state from disk, executes one phase, saves state, and exits. An outer bash loop continuously restarts it until completion.
 
-## Commands
+## Prerequisites
+
+- Node.js 20+
+- Git (for worktree isolation features)
+- Claude Code CLI configured with API access
+
+## Development Commands
 
 ```bash
-npm run build        # Compile TypeScript to dist/
-npm run dev          # Run directly with tsx (no compile needed)
-npm run test         # Run all tests
-npm run test:prompts # Test prompt harness
-npm run eval         # Run prompt evals
+npm install           # Install dependencies
+npm run build         # Compile TypeScript to dist/
+npm run dev           # Run directly with tsx (no compile needed)
+npm run test          # Run all tests
+npm run test:prompts  # Test prompt harness
+npm run eval          # Run prompt evals
+npm run lint          # Run biome linter
+npm run typecheck     # Type check without emitting
+```
 
-# Run the CLI
+## Running the CLI
+
+```bash
+# Basic usage
 ./bin/sq --spec <path> --effort medium --tui
+
+# Common options
+./bin/sq --spec <path> --dry-run       # Preview without executing
 ./bin/sq --spec <path> --no-worktrees  # Disable git worktree isolation
-./bin/sq --spec <path> --dry-run       # Show what would happen
+./bin/sq --spec <path> --resume        # Resume interrupted run
+./bin/sq --spec <path> --reset         # Discard state, start fresh
 
 # Cleanup
 ./bin/sq clean --all                   # Clean all sq worktrees
@@ -66,7 +83,7 @@ Disable with `--no-worktrees` for simpler single-agent runs.
 ### Key Directories
 
 - `src/orchestrator/` - Core state machine and phase implementations
-- `src/orchestrator/phases/` - Individual phase logic (enumerate, plan, build, review, conflict)
+- `src/orchestrator/phases/` - Individual phase logic (enumerate, plan, build, review, conflict, revise)
 - `src/agents/` - Agent spawning configs and system prompts
 - `src/loops/` - LoopManager for parallel execution, stuck detection
 - `src/worktrees/` - Git worktree management for parallel isolation
@@ -81,12 +98,12 @@ Disable with `--no-worktrees` for simpler single-agent runs.
 
 The `--effort` flag controls orchestrator behavior:
 
-| Level | Review After | Review Interval | Depth | Stuck Threshold |
-|-------|--------------|-----------------|-------|-----------------|
-| low | neither | 10 iterations | shallow | 5 errors |
-| medium | plan | 5 iterations | standard | 4 errors |
-| high | both | 3 iterations | deep | 3 errors |
-| max | both | every iteration | comprehensive | 2 errors |
+| Level | Review After | Review Interval | Depth | Stuck Threshold | Max Revisions |
+|-------|--------------|-----------------|-------|-----------------|---------------|
+| low | neither | 10 iterations | shallow | 5 errors | 10 |
+| medium | plan | 5 iterations | standard | 4 errors | 8 |
+| high | both | 3 iterations | deep | 3 errors | 5 |
+| max | both | every iteration | comprehensive | 2 errors | 3 |
 
 ### State Persistence
 
@@ -102,9 +119,11 @@ State is persisted to SQLite (`.sq/state.db`) with tables for:
 Tests use Node's built-in test runner with tsx:
 
 ```bash
-npx tsx --test                           # Run all tests
+npm run test                             # Run all tests
 npx tsx --test src/loops/manager.test.ts # Run single test file
 ```
+
+Test files are colocated with source files using `.test.ts` suffix.
 
 ## Type System
 
@@ -119,11 +138,47 @@ Core types in `src/types/`:
 The eval system tests prompt quality with automated grading:
 
 ```bash
-npm run eval                           # Run all test suites
-npm run eval -- --case enumerate       # Run specific suite
-npm run eval -- --compare promptA promptB  # A/B compare prompts
-npm run eval -- --baseline             # Save results as baseline
-npm run eval -- --check                # Check for regressions
+npm run eval                              # Run all test suites
+npm run eval -- --case enumerate          # Run specific suite
+npm run eval -- --compare promptA promptB # A/B compare prompts
+npm run eval -- --baseline                # Save results as baseline
+npm run eval -- --check                   # Check for regressions
 ```
 
 Test cases live in `evals/cases/*.yaml`. Each defines inputs and expected behaviors that the grader scores.
+
+## Troubleshooting
+
+### Tests fail with "database is locked"
+
+Multiple test files may conflict when accessing SQLite. Run tests sequentially:
+```bash
+npx tsx --test src/path/to/specific.test.ts
+```
+
+### Stale worktrees cause git errors
+
+Clean up orphaned worktrees and branches:
+```bash
+./bin/sq clean --all
+git worktree prune
+```
+
+### State corruption after interrupted run
+
+Reset state and start fresh:
+```bash
+./bin/sq --spec <path> --reset
+```
+
+Or manually remove state directory:
+```bash
+rm -rf .sq/
+```
+
+### MCP server connection issues
+
+The MCP server runs on a Unix socket in the state directory. If connections fail:
+1. Check `.sq/` exists and is writable
+2. Ensure no zombie sq processes: `pkill -f "sq-mcp"`
+3. Try `--reset` to reinitialize state

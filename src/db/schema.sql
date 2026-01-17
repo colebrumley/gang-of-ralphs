@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS loops (
   last_file_change_iteration INTEGER NOT NULL DEFAULT 0,
   cost_usd REAL NOT NULL DEFAULT 0,
   worktree_path TEXT,
+  phase TEXT NOT NULL DEFAULT 'build', -- Phase that created this loop
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -90,8 +91,17 @@ CREATE TABLE IF NOT EXISTS review_issues (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Phase costs: accumulated costs per phase per run
+CREATE TABLE IF NOT EXISTS phase_costs (
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  phase TEXT NOT NULL CHECK (phase IN ('enumerate', 'plan', 'build', 'review', 'revise', 'conflict', 'complete')),
+  cost_usd REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (run_id, phase)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
 CREATE INDEX IF NOT EXISTS idx_phase_history_run ON phase_history(run_id);
 CREATE INDEX IF NOT EXISTS idx_review_issues_run ON review_issues(run_id);
+CREATE INDEX IF NOT EXISTS idx_phase_costs_run ON phase_costs(run_id);

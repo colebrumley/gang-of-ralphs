@@ -2,6 +2,17 @@
 
 This guide explains how to write effective specification files that Claude Squad can break into tasks and implement efficiently.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Spec Format](#spec-format)
+- [What Makes a Good Spec](#what-makes-a-good-spec)
+- [Example Specs](#example-specs)
+- [Common Mistakes](#common-mistakes)
+- [Effort Levels and Specs](#effort-levels-and-specs)
+- [Quick Checklist](#quick-checklist)
+- [Validating Your Spec](#validating-your-spec)
+
 ## Overview
 
 Claude Squad accepts markdown spec files via `--spec <path>`. The spec is read by the ENUMERATE agent, which breaks it into discrete tasks. Better specs lead to better task breakdowns, more accurate parallel execution, and higher quality implementations.

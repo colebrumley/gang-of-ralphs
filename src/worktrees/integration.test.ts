@@ -1,10 +1,10 @@
-// src/worktrees/integration.test.ts
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+// src/worktrees/integration.test.ts
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import { WorktreeManager } from './manager.js';
 
 describe('Worktree Integration', () => {

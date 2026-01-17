@@ -1,8 +1,7 @@
-import React from 'react';
 import { Box, Text } from 'ink';
-import type { OrchestratorState, LoopState } from '../types/index.js';
-import { Header } from './Header.js';
+import type { LoopState, OrchestratorState } from '../types/index.js';
 import { Column } from './Column.js';
+import { Header } from './Header.js';
 
 interface LayoutProps {
   state: OrchestratorState;
@@ -10,7 +9,7 @@ interface LayoutProps {
 }
 
 export function Layout({ state, loops }: LayoutProps) {
-  const activeLoops = loops.filter(l => l.status === 'running' || l.status === 'pending');
+  const activeLoops = loops.filter((l) => l.status === 'running' || l.status === 'pending');
 
   return (
     <Box flexDirection="column">
@@ -18,15 +17,9 @@ export function Layout({ state, loops }: LayoutProps) {
 
       {/* Loop columns */}
       <Box>
-        {loops.slice(0, state.maxLoops).map(loop => {
-          const task = state.tasks.find(t => t.id === loop.taskIds[0]);
-          return (
-            <Column
-              key={loop.loopId}
-              loop={loop}
-              taskTitle={task?.title || 'Unknown'}
-            />
-          );
+        {loops.slice(0, state.maxLoops).map((loop) => {
+          const task = state.tasks.find((t) => t.id === loop.taskIds[0]);
+          return <Column key={loop.loopId} loop={loop} taskTitle={task?.title || 'Unknown'} />;
         })}
 
         {/* Empty columns if fewer loops than max */}
@@ -41,7 +34,7 @@ export function Layout({ state, loops }: LayoutProps) {
 
       {/* Footer */}
       <Box borderStyle="single" paddingX={1}>
-        <Text dimColor>[q]uit  [p]ause  [r]eview now  [1-4] focus</Text>
+        <Text dimColor>[q]uit [p]ause [r]eview now [1-4] focus</Text>
       </Box>
     </Box>
   );

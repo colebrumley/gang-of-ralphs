@@ -1,6 +1,6 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { parsePlanOutput, buildTaskGraph } from './plan.js';
+import { describe, test } from 'node:test';
+import { buildTaskGraph, parsePlanOutput } from './plan.js';
 
 describe('Plan Phase', () => {
   test('parsePlanOutput extracts parallel groups', () => {
@@ -16,16 +16,29 @@ describe('Plan Phase', () => {
 
     const result = parsePlanOutput(output);
 
-    assert.deepStrictEqual(result.parallelGroups, [
-      ['task-1', 'task-2'],
-      ['task-3']
-    ]);
+    assert.deepStrictEqual(result.parallelGroups, [['task-1', 'task-2'], ['task-3']]);
   });
 
   test('buildTaskGraph creates valid graph from tasks and groups', () => {
     const tasks = [
-      { id: 'task-1', title: 'A', description: '', status: 'pending' as const, dependencies: [], estimatedIterations: 5, assignedLoopId: null },
-      { id: 'task-2', title: 'B', description: '', status: 'pending' as const, dependencies: [], estimatedIterations: 5, assignedLoopId: null },
+      {
+        id: 'task-1',
+        title: 'A',
+        description: '',
+        status: 'pending' as const,
+        dependencies: [],
+        estimatedIterations: 5,
+        assignedLoopId: null,
+      },
+      {
+        id: 'task-2',
+        title: 'B',
+        description: '',
+        status: 'pending' as const,
+        dependencies: [],
+        estimatedIterations: 5,
+        assignedLoopId: null,
+      },
     ];
     const parallelGroups = [['task-1', 'task-2']];
 

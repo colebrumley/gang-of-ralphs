@@ -9,9 +9,10 @@ export function printDryRunSummary(state: OrchestratorState): void {
   // Print tasks with dependencies
   console.log(`Tasks (${state.tasks.length}):`);
   for (const task of state.tasks) {
-    const deps = task.dependencies.length > 0
-      ? `depends on: ${task.dependencies.join(', ')}`
-      : 'depends on: none';
+    const deps =
+      task.dependencies.length > 0
+        ? `depends on: ${task.dependencies.join(', ')}`
+        : 'depends on: none';
     console.log(`  [${task.id}] ${task.title} - ${deps}`);
   }
 

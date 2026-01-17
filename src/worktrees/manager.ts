@@ -18,9 +18,7 @@ export interface CreateResult {
   branchName: string;
 }
 
-export type MergeResult =
-  | { status: 'success' }
-  | { status: 'conflict'; conflictFiles: string[] };
+export type MergeResult = { status: 'success' } | { status: 'conflict'; conflictFiles: string[] };
 
 export class WorktreeManager {
   private config: WorktreeManagerConfig;
@@ -72,7 +70,7 @@ export class WorktreeManager {
       return { status: 'success' };
     } catch (e) {
       // Check for conflicts
-      const { stdout } = await execAsync(`git diff --name-only --diff-filter=U`, {
+      const { stdout } = await execAsync('git diff --name-only --diff-filter=U', {
         cwd: this.config.repoDir,
       });
       const conflictFiles = stdout.trim().split('\n').filter(Boolean);
@@ -106,7 +104,7 @@ export class WorktreeManager {
   }
 
   async cleanupAll(): Promise<void> {
-    const { stdout } = await execAsync(`git worktree list --porcelain`, {
+    const { stdout } = await execAsync('git worktree list --porcelain', {
       cwd: this.config.repoDir,
     });
 

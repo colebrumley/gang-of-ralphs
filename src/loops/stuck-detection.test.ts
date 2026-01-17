@@ -1,7 +1,7 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { detectStuck, StuckReason } from './stuck-detection.js';
+import { describe, test } from 'node:test';
 import type { LoopState } from '../types/index.js';
+import { StuckReason, detectStuck } from './stuck-detection.js';
 
 describe('Stuck Detection', () => {
   const baseLoop: LoopState = {
@@ -20,6 +20,7 @@ describe('Stuck Detection', () => {
     },
     output: [],
     worktreePath: null,
+    phase: 'build',
   };
 
   test('returns null when not stuck', () => {

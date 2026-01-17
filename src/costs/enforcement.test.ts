@@ -1,13 +1,13 @@
-import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import { describe, it } from 'node:test';
+import type { CostLimits, CostTracking } from '../types/index.js';
 import {
-  checkRunCostLimit,
-  checkPhaseCostLimit,
-  checkLoopCostLimit,
   checkAllCostLimits,
+  checkLoopCostLimit,
+  checkPhaseCostLimit,
+  checkRunCostLimit,
   formatCostExceededError,
 } from './enforcement.js';
-import type { CostLimits, CostTracking } from '../types/index.js';
 
 describe('cost enforcement', () => {
   const defaultLimits: CostLimits = {
@@ -178,8 +178,8 @@ describe('cost enforcement', () => {
       const msg = formatCostExceededError({
         exceeded: true,
         type: 'run',
-        current: 5.50,
-        limit: 5.00,
+        current: 5.5,
+        limit: 5.0,
       });
       assert.strictEqual(msg, 'Run cost limit exceeded: $5.50 >= $5.00');
     });
@@ -189,7 +189,7 @@ describe('cost enforcement', () => {
         exceeded: true,
         type: 'phase',
         current: 2.25,
-        limit: 2.00,
+        limit: 2.0,
         phase: 'build',
       });
       assert.strictEqual(msg, "Phase 'build' cost limit exceeded: $2.25 >= $2.00");
@@ -199,8 +199,8 @@ describe('cost enforcement', () => {
       const msg = formatCostExceededError({
         exceeded: true,
         type: 'loop',
-        current: 1.10,
-        limit: 1.00,
+        current: 1.1,
+        limit: 1.0,
         loopId: 'loop-abc123',
       });
       assert.strictEqual(msg, "Loop 'loop-abc123' cost limit exceeded: $1.10 >= $1.00");

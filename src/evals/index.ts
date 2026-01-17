@@ -1,17 +1,14 @@
 import { Command } from 'commander';
+import { printComparisonResult, runComparison } from './compare.js';
 import { loadAllTestSuites, loadTestSuiteByName } from './loader.js';
-import { runTestSuite } from './runner.js';
+import { checkRegression, saveBaseline } from './regression.js';
 import { printEvalRunResult, saveResults } from './reporter.js';
-import { runComparison, printComparisonResult } from './compare.js';
-import { saveBaseline, checkRegression } from './regression.js';
+import { runTestSuite } from './runner.js';
 import type { EvalRunResult, TestSuiteResult } from './types.js';
 
 const program = new Command();
 
-program
-  .name('eval')
-  .description('Eval system for testing C2 prompts')
-  .version('1.0.0');
+program.name('eval').description('Eval system for testing C2 prompts').version('1.0.0');
 
 program
   .option('-c, --case <name>', 'Run specific test suite by name')
@@ -86,7 +83,7 @@ program
 
       // Check regression if requested
       if (options.check) {
-        const threshold = parseFloat(options.threshold);
+        const threshold = Number.parseFloat(options.threshold);
         const passed = await checkRegression(evalResult, threshold, baseDir);
         if (!passed) {
           console.error('\n❌ Regression detected!');

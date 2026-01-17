@@ -1,6 +1,6 @@
 import { loadAllTestSuites, loadTestSuiteByName } from './loader.js';
 import { resolvePrompt, runTestSuiteWithPrompt } from './runner.js';
-import type { ComparisonResult, ComparisonCaseResult, TestSuiteResult } from './types.js';
+import type { ComparisonCaseResult, ComparisonResult, TestSuiteResult } from './types.js';
 
 // Re-export printComparisonResult from reporter
 export { printComparisonResult } from './reporter.js';
@@ -73,7 +73,7 @@ function buildComparisonResult(
     overallWinner = 'B';
   }
 
-  const percentDiff = Math.abs(avgA - avgB) / Math.min(avgA, avgB) * 100;
+  const percentDiff = (Math.abs(avgA - avgB) / Math.min(avgA, avgB)) * 100;
 
   return {
     promptA,

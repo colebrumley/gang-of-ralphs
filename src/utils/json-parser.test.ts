@@ -1,6 +1,6 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { extractJSON, JSONExtractionError } from './json-parser.js';
+import { describe, test } from 'node:test';
+import { JSONExtractionError, extractJSON } from './json-parser.js';
 
 describe('JSON Parser', () => {
   test('extracts JSON from markdown code block', () => {
@@ -14,10 +14,7 @@ describe('JSON Parser', () => {
 \`\`\`
 Done!`;
 
-    const result = extractJSON<{ tasks: { id: string; title: string }[] }>(
-      output,
-      ['tasks']
-    );
+    const result = extractJSON<{ tasks: { id: string; title: string }[] }>(output, ['tasks']);
 
     assert.strictEqual(result.tasks.length, 1);
     assert.strictEqual(result.tasks[0].id, 'task-1');
@@ -42,27 +39,22 @@ Done!`;
   test('throws JSONExtractionError when no JSON found', () => {
     const output = 'No JSON here at all';
 
-    assert.throws(
-      () => extractJSON(output, ['tasks']),
-      JSONExtractionError
-    );
+    assert.throws(() => extractJSON(output, ['tasks']), JSONExtractionError);
   });
 
   test('throws when required keys missing', () => {
     const output = '{"other": "value"}';
 
-    assert.throws(
-      () => extractJSON(output, ['tasks']),
-      JSONExtractionError
-    );
+    assert.throws(() => extractJSON(output, ['tasks']), JSONExtractionError);
   });
 
   test('validates multiple required keys', () => {
     const output = '{"tasks": [], "parallelGroups": []}';
 
-    const result = extractJSON<{ tasks: unknown[]; parallelGroups: unknown[] }>(
-      output, ['tasks', 'parallelGroups']
-    );
+    const result = extractJSON<{ tasks: unknown[]; parallelGroups: unknown[] }>(output, [
+      'tasks',
+      'parallelGroups',
+    ]);
     assert.ok('tasks' in result);
     assert.ok('parallelGroups' in result);
   });

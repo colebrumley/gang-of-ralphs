@@ -1,19 +1,28 @@
+import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { OrchestratorState, Task, TaskGraph } from '../../types/index.js';
-import { createAgentConfig } from '../../agents/spawn.js';
 import { PLAN_PROMPT_JSON } from '../../agents/prompts.js';
+import { createAgentConfig } from '../../agents/spawn.js';
+import type { OrchestratorState, Task, TaskGraph } from '../../types/index.js';
 
 export interface PlanOutput {
   parallelGroups: string[][];
   reasoning: string;
 }
 
+function truncateOutput(output: string, maxLength = 500): string {
+  if (output.length <= maxLength) return output;
+  return `${output.slice(0, maxLength)}... (${output.length - maxLength} more chars)`;
+}
+
 export function parsePlanOutput(output: string): PlanOutput {
-  const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-                    output.match(/(\{[\s\S]*"parallelGroups"[\s\S]*\})/);
+  const jsonMatch =
+    output.match(/```(?:json)?\s*([\s\S]*?)```/) ||
+    output.match(/(\{[\s\S]*"parallelGroups"[\s\S]*\})/);
 
   if (!jsonMatch) {
-    throw new Error('Failed to parse: No JSON found in output');
+    throw new Error(
+      `Failed to parse: No JSON found in output. Agent output: ${truncateOutput(output)}`
+    );
   }
 
   try {
@@ -23,7 +32,10 @@ export function parsePlanOutput(output: string): PlanOutput {
       reasoning: parsed.reasoning || '',
     };
   } catch (e) {
-    throw new Error(`Failed to parse: ${e}`);
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Failed to parse JSON: ${errorMsg}. Matched content: ${truncateOutput(jsonMatch[1])}`
+    );
   }
 }
 
@@ -43,7 +55,8 @@ export async function executePlan(
   state: OrchestratorState,
   onOutput?: (text: string) => void
 ): Promise<PlanResult> {
-  const config = createAgentConfig('plan', process.cwd());
+  const dbPath = join(state.stateDir, 'state.db');
+  const config = createAgentConfig('plan', process.cwd(), state.runId, dbPath);
 
   const tasksJson = JSON.stringify(state.tasks, null, 2);
   const prompt = `${PLAN_PROMPT_JSON}
@@ -53,10 +66,12 @@ ${tasksJson}`;
 
   let fullOutput = '';
   let costUsd = 0;
+  const cwd = process.cwd();
 
   for await (const message of query({
     prompt,
     options: {
+      cwd,
       allowedTools: config.allowedTools,
       maxTurns: config.maxTurns,
     },

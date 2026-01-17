@@ -1,9 +1,9 @@
-import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDatabase, closeDatabase } from './index.js';
+import { afterEach, beforeEach, describe, test } from 'node:test';
+import { closeDatabase, createDatabase } from './index.js';
 
 describe('Database', () => {
   let tempDir: string;
@@ -21,11 +21,11 @@ describe('Database', () => {
 
   test('createDatabase initializes schema', () => {
     const db = createDatabase(dbPath);
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table'"
-    ).all() as { name: string }[];
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as {
+      name: string;
+    }[];
 
-    const tableNames = tables.map(t => t.name);
+    const tableNames = tables.map((t) => t.name);
     assert.ok(tableNames.includes('runs'));
     assert.ok(tableNames.includes('tasks'));
     assert.ok(tableNames.includes('loops'));

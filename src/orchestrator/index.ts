@@ -1,24 +1,20 @@
 import { join } from 'node:path';
-import type { OrchestratorState, Phase, CostTracking } from '../types/index.js';
 import { getEffortConfig } from '../config/effort.js';
+import { checkRunCostLimit, formatCostExceededError } from '../costs/index.js';
 import { LoopManager } from '../loops/manager.js';
+import type { CostTracking, OrchestratorState, Phase } from '../types/index.js';
 import { WorktreeManager } from '../worktrees/manager.js';
+import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
+import { resolveConflict } from './phases/conflict.js';
 import { executeEnumerate } from './phases/enumerate.js';
 import { executePlan } from './phases/plan.js';
-import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
 import { executeReview } from './phases/review.js';
-import { resolveConflict } from './phases/conflict.js';
-import { checkRunCostLimit, formatCostExceededError } from '../costs/index.js';
+import { executeRevise } from './phases/revise.js';
 
 /**
  * Update cost tracking state with new costs from a phase or loop execution.
  */
-function updateCosts(
-  costs: CostTracking,
-  phase: Phase,
-  costUsd: number,
-  loopId?: string
-): void {
+function updateCosts(costs: CostTracking, phase: Phase, costUsd: number, loopId?: string): void {
   costs.totalCostUsd += costUsd;
   costs.phaseCosts[phase] = (costs.phaseCosts[phase] || 0) + costUsd;
   if (loopId) {
@@ -49,6 +45,7 @@ export async function runOrchestrator(
       success: false,
       timestamp: new Date().toISOString(),
       summary: errorMsg,
+      costUsd: 0,
     });
     state.phase = 'complete';
     callbacks.onPhaseComplete?.(state.phase, false);
@@ -68,6 +65,7 @@ export async function runOrchestrator(
           success: true,
           timestamp: new Date().toISOString(),
           summary: `Enumerated ${result.tasks.length} tasks`,
+          costUsd: result.costUsd,
         });
 
         // Check if we need to review
@@ -90,6 +88,7 @@ export async function runOrchestrator(
           success: true,
           timestamp: new Date().toISOString(),
           summary: `Created plan with ${result.taskGraph.parallelGroups.length} parallel groups`,
+          costUsd: result.costUsd,
         });
 
         if (effortConfig.reviewAfterPlan) {
@@ -104,31 +103,31 @@ export async function runOrchestrator(
 
       case 'build': {
         // Create WorktreeManager if worktrees are enabled
-        const worktreeManager = state.useWorktrees && state.baseBranch
-          ? new WorktreeManager({
-              repoDir: process.cwd(),
-              worktreeBaseDir: join(state.stateDir, 'worktrees'),
-              baseBranch: state.baseBranch,
-              runId: state.runId,
-            })
-          : undefined;
+        const worktreeManager =
+          state.useWorktrees && state.baseBranch
+            ? new WorktreeManager({
+                repoDir: process.cwd(),
+                worktreeBaseDir: join(state.stateDir, 'worktrees'),
+                baseBranch: state.baseBranch,
+                runId: state.runId,
+              })
+            : undefined;
 
-        const loopManager = new LoopManager({
-          maxLoops: state.maxLoops,
-          maxIterations: state.maxIterations,
-          reviewInterval: effortConfig.reviewInterval,
-        }, worktreeManager);
+        const loopManager = new LoopManager(
+          {
+            maxLoops: state.maxLoops,
+            maxIterations: state.maxIterations,
+            reviewInterval: effortConfig.reviewInterval,
+          },
+          worktreeManager
+        );
 
         // Restore active loops from state
         for (const loop of state.activeLoops) {
           loopManager.restoreLoop(loop);
         }
 
-        const result = await executeBuildIteration(
-          state,
-          loopManager,
-          callbacks.onLoopOutput
-        );
+        const result = await executeBuildIteration(state, loopManager, callbacks.onLoopOutput);
 
         state.completedTasks = result.completedTasks;
         state.activeLoops = result.activeLoops;
@@ -173,7 +172,8 @@ export async function runOrchestrator(
           timestamp: new Date().toISOString(),
           summary: result.passed
             ? 'Review passed'
-            : `Review failed: ${result.issues.map(i => i.description).join(', ')}`,
+            : `Review failed: ${result.issues.map((i) => i.description).join(', ')}`,
+          costUsd: result.costUsd,
         });
 
         state.pendingReview = false;
@@ -209,14 +209,46 @@ export async function runOrchestrator(
       }
 
       case 'revise': {
+        // Check revision limit to prevent infinite review loops
+        if (state.revisionCount >= effortConfig.maxRevisions) {
+          const errorMsg = `Exceeded max revisions (${effortConfig.maxRevisions}). Review loop may be stuck.`;
+          state.context.errors.push(errorMsg);
+          state.phaseHistory.push({
+            phase: 'revise',
+            success: false,
+            timestamp: new Date().toISOString(),
+            summary: errorMsg,
+            costUsd: 0,
+          });
+          state.phase = 'complete';
+          callbacks.onPhaseComplete?.(state.phase, false);
+          return state;
+        }
+
+        // Run the revise agent to analyze issues and create fix plan
+        const reviseResult = await executeRevise(state, callbacks.onOutput);
+        updateCosts(state.costs, 'revise', reviseResult.costUsd);
+
         state.revisionCount++;
+
+        // Store the fix plan in context for the build phase
+        if (reviseResult.success && reviseResult.additionalContext) {
+          state.context.discoveries.push(`Revision plan: ${reviseResult.additionalContext}`);
+        }
+        if (reviseResult.analysis) {
+          state.context.discoveries.push(`Revision analysis: ${reviseResult.analysis}`);
+        }
+
         // Go back to build phase with context about what to fix
         state.phase = 'build';
         state.phaseHistory.push({
           phase: 'revise',
-          success: true,
+          success: reviseResult.success,
           timestamp: new Date().toISOString(),
-          summary: `Revision ${state.revisionCount} - returning to build`,
+          summary: reviseResult.success
+            ? `Revision ${state.revisionCount} - analyzed ${state.context.reviewIssues.length} issues, returning to build`
+            : `Revision ${state.revisionCount} - analysis incomplete, returning to build`,
+          costUsd: reviseResult.costUsd,
         });
         break;
       }
@@ -227,7 +259,7 @@ export async function runOrchestrator(
         }
 
         const { loopId, taskId, conflictFiles } = state.pendingConflict;
-        const task = state.tasks.find(t => t.id === taskId);
+        const task = state.tasks.find((t) => t.id === taskId);
 
         if (!task) {
           throw new Error(`Task ${taskId} not found for conflict resolution`);
@@ -236,6 +268,8 @@ export async function runOrchestrator(
         const result = await resolveConflict(
           task,
           conflictFiles,
+          state.stateDir,
+          state.runId,
           state.stateDir,
           callbacks.onOutput
         );
@@ -248,6 +282,7 @@ export async function runOrchestrator(
           summary: result.resolved
             ? `Resolved merge conflict in ${conflictFiles.length} file(s)`
             : `Failed to resolve conflict: ${result.error}`,
+          costUsd: result.costUsd,
         });
 
         if (result.resolved) {
@@ -255,7 +290,7 @@ export async function runOrchestrator(
           state.phase = 'build';
         } else {
           // Mark the loop as failed
-          const loop = state.activeLoops.find(l => l.loopId === loopId);
+          const loop = state.activeLoops.find((l) => l.loopId === loopId);
           if (loop) {
             loop.status = 'failed';
           }
@@ -283,7 +318,7 @@ export async function runOrchestrator(
 
 export function getExitCode(state: OrchestratorState): number {
   if (state.phase === 'complete') return 0;
-  if (state.activeLoops.some(l => l.status === 'stuck')) return 2;
+  if (state.activeLoops.some((l) => l.status === 'stuck')) return 2;
   if (state.context.errors.length > 0) return 1;
   return 0; // Still running, will be restarted by outer loop
 }

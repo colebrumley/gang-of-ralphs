@@ -21,10 +21,7 @@ export class JSONExtractionError extends Error {
  * @returns The parsed JSON object
  * @throws JSONExtractionError if no valid JSON found or required keys missing
  */
-export function extractJSON<T = unknown>(
-  output: string,
-  requiredKeys: string[] = []
-): T {
+export function extractJSON<T = unknown>(output: string, requiredKeys: string[] = []): T {
   // Try multiple extraction patterns
   const patterns = [
     // JSON in markdown code blocks with json tag
@@ -45,18 +42,13 @@ export function extractJSON<T = unknown>(
         const parsed = JSON.parse(jsonStr);
 
         // Validate required keys
-        const missingKeys = requiredKeys.filter(
-          (key) => !(key in parsed)
-        );
+        const missingKeys = requiredKeys.filter((key) => !(key in parsed));
         if (missingKeys.length > 0) {
           continue; // Try next pattern
         }
 
         return parsed as T;
-      } catch {
-        // Try next pattern
-        continue;
-      }
+      } catch {}
     }
   }
 

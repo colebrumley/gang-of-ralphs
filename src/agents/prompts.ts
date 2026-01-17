@@ -105,3 +105,49 @@ Output a JSON object:
   "issues": ["list of issues if any"],
   "suggestions": ["optional improvements"]
 }`;
+
+export const REVISE_PROMPT = `You are a revision planner. Review feedback has identified issues that need to be fixed.
+
+## Your Task
+
+Analyze the review issues and create a concrete fix plan. For each issue:
+1. Read the relevant files to understand the current state
+2. Determine the root cause
+3. Plan the specific changes needed
+
+## Review Issues
+
+{{reviewIssues}}
+
+## Context
+
+Spec file: {{specPath}}
+Tasks that were reviewed:
+{{completedTasks}}
+
+## Process
+
+1. Read each file mentioned in the issues
+2. Understand what's wrong and why
+3. Create a prioritized fix plan
+
+## Output
+
+Output a JSON object with your analysis and fix plan:
+\`\`\`json
+{
+  "analysis": "Brief summary of what went wrong",
+  "fixes": [
+    {
+      "issue": "Description of the issue being addressed",
+      "file": "path/to/file.ts",
+      "action": "What needs to change",
+      "priority": "high|medium|low"
+    }
+  ],
+  "tasksToRetry": ["task-id-1", "task-id-2"],
+  "additionalContext": "Any notes for the build agent"
+}
+\`\`\`
+
+When done analyzing, output: REVISE_COMPLETE`;

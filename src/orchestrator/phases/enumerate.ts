@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { OrchestratorState, Task } from '../../types/index.js';
-import { createAgentConfig } from '../../agents/spawn.js';
 import { ENUMERATE_PROMPT_JSON } from '../../agents/prompts.js';
+import { createAgentConfig } from '../../agents/spawn.js';
+import type { OrchestratorState, Task } from '../../types/index.js';
 import { extractJSON } from '../../utils/json-parser.js';
 
 // Task granularity bounds (Risk #5 mitigation)
@@ -25,19 +26,18 @@ export function validateTaskGranularity(tasks: Task[]): GranularityValidation {
     if (task.estimatedIterations < MIN_ESTIMATED_ITERATIONS) {
       warnings.push(
         `Task "${task.title}" (${task.id}) may be too small ` +
-        `(${task.estimatedIterations} iterations). Consider combining with related tasks.`
+          `(${task.estimatedIterations} iterations). Consider combining with related tasks.`
       );
     }
     if (task.estimatedIterations > MAX_ESTIMATED_ITERATIONS) {
       warnings.push(
         `Task "${task.title}" (${task.id}) may be too large ` +
-        `(${task.estimatedIterations} iterations). Consider breaking into subtasks.`
+          `(${task.estimatedIterations} iterations). Consider breaking into subtasks.`
       );
     }
     if (task.description.length < 20) {
       warnings.push(
-        `Task "${task.title}" (${task.id}) has a short description. ` +
-        `More detail helps the build agent.`
+        `Task "${task.title}" (${task.id}) has a short description. More detail helps the build agent.`
       );
     }
   }
@@ -73,7 +73,8 @@ export async function executeEnumerate(
   onOutput?: (text: string) => void
 ): Promise<EnumerateResult> {
   const specContent = await readFile(state.specPath, 'utf-8');
-  const config = createAgentConfig('enumerate', process.cwd());
+  const dbPath = join(state.stateDir, 'state.db');
+  const config = createAgentConfig('enumerate', process.cwd(), state.runId, dbPath);
 
   const prompt = `${ENUMERATE_PROMPT_JSON}
 
@@ -82,10 +83,12 @@ ${specContent}`;
 
   let fullOutput = '';
   let costUsd = 0;
+  const cwd = process.cwd();
 
   for await (const message of query({
     prompt,
     options: {
+      cwd,
       allowedTools: config.allowedTools,
       maxTurns: config.maxTurns,
     },

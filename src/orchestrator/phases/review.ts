@@ -1,7 +1,13 @@
+import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { OrchestratorState, ReviewType, ReviewIssue, ReviewIssueType } from '../../types/index.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import type { EffortConfig } from '../../config/effort.js';
+import type {
+  OrchestratorState,
+  ReviewIssue,
+  ReviewIssueType,
+  ReviewType,
+} from '../../types/index.js';
 
 export interface ReviewResult {
   passed: boolean;
@@ -40,21 +46,28 @@ function normalizeIssue(issue: unknown): ReviewIssue {
   };
 }
 
+function truncateOutput(output: string, maxLength = 500): string {
+  if (output.length <= maxLength) return output;
+  return `${output.slice(0, maxLength)}... (${output.length - maxLength} more chars)`;
+}
+
 export function parseReviewOutput(output: string): ParsedReviewOutput {
-  const jsonMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/) ||
-                    output.match(/(\{[\s\S]*"passed"[\s\S]*\})/);
+  const jsonMatch =
+    output.match(/```(?:json)?\s*([\s\S]*?)```/) || output.match(/(\{[\s\S]*"passed"[\s\S]*\})/);
 
   if (!jsonMatch) {
     return {
       passed: false,
-      issues: [{
-        taskId: '',
-        file: 'unknown',
-        type: 'pattern-violation',
-        description: 'Failed to parse review output',
-        suggestion: 'Check agent output format'
-      }],
-      suggestions: []
+      issues: [
+        {
+          taskId: '',
+          file: 'unknown',
+          type: 'pattern-violation',
+          description: `Failed to parse review output: no JSON block found. Agent output: ${truncateOutput(output)}`,
+          suggestion: 'Check agent output format',
+        },
+      ],
+      suggestions: [],
     };
   }
 
@@ -67,17 +80,20 @@ export function parseReviewOutput(output: string): ParsedReviewOutput {
       issues: rawIssues.map((issue: unknown) => normalizeIssue(issue)),
       suggestions: parsed.suggestions ?? [],
     };
-  } catch {
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
     return {
       passed: false,
-      issues: [{
-        taskId: '',
-        file: 'unknown',
-        type: 'pattern-violation',
-        description: 'Failed to parse review JSON',
-        suggestion: 'Check JSON syntax'
-      }],
-      suggestions: []
+      issues: [
+        {
+          taskId: '',
+          file: 'unknown',
+          type: 'pattern-violation',
+          description: `Failed to parse review JSON: ${errorMsg}. Matched content: ${truncateOutput(jsonMatch[1])}`,
+          suggestion: 'Check JSON syntax',
+        },
+      ],
+      suggestions: [],
     };
   }
 }
@@ -158,7 +174,8 @@ export async function executeReview(
   depth: EffortConfig['reviewDepth'],
   onOutput?: (text: string) => void
 ): Promise<ReviewResult> {
-  const config = createAgentConfig('review', process.cwd());
+  const dbPath = join(state.stateDir, 'state.db');
+  const config = createAgentConfig('review', process.cwd(), state.runId, dbPath);
 
   let context = '';
   switch (reviewType) {
@@ -169,10 +186,12 @@ export async function executeReview(
       context = `Review the execution plan:\n${JSON.stringify(state.taskGraph, null, 2)}`;
       break;
     case 'build': {
-      const taskDetails = state.completedTasks.map(id => {
-        const task = state.tasks.find(t => t.id === id);
-        return task ? `- ${id}: ${task.title}\n  ${task.description}` : `- ${id}`;
-      }).join('\n');
+      const taskDetails = state.completedTasks
+        .map((id) => {
+          const task = state.tasks.find((t) => t.id === id);
+          return task ? `- ${id}: ${task.title}\n  ${task.description}` : `- ${id}`;
+        })
+        .join('\n');
       context = `Review the completed work.\n\nCompleted tasks:\n${taskDetails}\n\nUse the Read and Glob tools to verify the implementation files exist and are correct.`;
       break;
     }
@@ -188,10 +207,12 @@ File: ${state.specPath}`;
 
   let fullOutput = '';
   let costUsd = 0;
+  const cwd = process.cwd();
 
   for await (const message of query({
     prompt,
     options: {
+      cwd,
       allowedTools: config.allowedTools,
       maxTurns: config.maxTurns,
     },

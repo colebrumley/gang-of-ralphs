@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and format check
+        run: npm run check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            # First release - get all commits
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges)
+          else
+            # Get commits since previous tag
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+          fi
+
+          # Categorize commits
+          FEATURES=$(echo "$COMMITS" | grep -E "^- feat" | sed 's/^- feat[:(]/- /' || true)
+          FIXES=$(echo "$COMMITS" | grep -E "^- fix" | sed 's/^- fix[:(]/- /' || true)
+          CHORES=$(echo "$COMMITS" | grep -E "^- (chore|docs|style|refactor|perf|test|ci)" || true)
+          OTHER=$(echo "$COMMITS" | grep -vE "^- (feat|fix|chore|docs|style|refactor|perf|test|ci)" || true)
+
+          # Build changelog
+          CHANGELOG=""
+
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="${CHANGELOG}## Features\n${FEATURES}\n\n"
+          fi
+
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="${CHANGELOG}## Bug Fixes\n${FIXES}\n\n"
+          fi
+
+          if [ -n "$OTHER" ]; then
+            CHANGELOG="${CHANGELOG}## Other Changes\n${OTHER}\n\n"
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="No notable changes in this release."
+          fi
+
+          # Write to file for the release step
+          echo -e "$CHANGELOG" > RELEASE_NOTES.md
+
+      - name: Create dist archive
+        run: |
+          zip -r dist.zip dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: dist.zip
+          generate_release_notes: false

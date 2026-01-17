@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Text } from 'ink';
 import type { OrchestratorState } from '../types/index.js';
 
@@ -19,10 +18,14 @@ export function Header({ state, activeLoopCount }: HeaderProps) {
       <Text color="yellow">{state.effort}</Text>
       <Text> | </Text>
       <Text>loops: </Text>
-      <Text color="green">{activeLoopCount}/{state.maxLoops}</Text>
+      <Text color="green">
+        {activeLoopCount}/{state.maxLoops}
+      </Text>
       <Text> | </Text>
       <Text>tasks: </Text>
-      <Text color="magenta">{state.completedTasks.length}/{state.tasks.length}</Text>
+      <Text color="magenta">
+        {state.completedTasks.length}/{state.tasks.length}
+      </Text>
     </Box>
   );
 }

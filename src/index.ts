@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-import { resolve, join } from 'node:path';
-import { access } from 'node:fs/promises';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { access } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { createCLI } from './cli.js';
-import { initializeState, loadState, saveRun } from './state/index.js';
-import { runOrchestrator, getExitCode } from './orchestrator/index.js';
 import { createDatabase } from './db/index.js';
+import { getExitCode, runOrchestrator } from './orchestrator/index.js';
 import { printDryRunSummary } from './orchestrator/summary.js';
+import { initializeState, loadState, saveRun } from './state/index.js';
 
 async function cleanWorktrees(runId?: string) {
   const worktreeDir = join(process.cwd(), '.sq', 'worktrees');
@@ -84,8 +84,8 @@ async function main() {
       specPath,
       effort: opts.effort,
       stateDir,
-      maxLoops: parseInt(opts.maxLoops, 10),
-      maxIterations: parseInt(opts.maxIterations, 10),
+      maxLoops: Number.parseInt(opts.maxLoops, 10),
+      maxIterations: Number.parseInt(opts.maxIterations, 10),
       useWorktrees: !opts.noWorktrees,
     });
 
@@ -169,8 +169,7 @@ async function main() {
       onPhaseComplete: (phase, success) =>
         console.log(`Phase ${phase} ${success ? 'completed' : 'failed'}`),
       onOutput: (text) => process.stdout.write(text),
-      onLoopOutput: (loopId, text) =>
-        console.log(`[${loopId.slice(0, 8)}] ${text}`),
+      onLoopOutput: (loopId, text) => console.log(`[${loopId.slice(0, 8)}] ${text}`),
     });
 
     // Save state after each phase for resume support

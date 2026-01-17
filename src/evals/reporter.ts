@@ -1,6 +1,6 @@
-import { writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { TestSuiteResult, EvalRunResult, ComparisonResult } from './types.js';
+import type { ComparisonResult, EvalRunResult, TestSuiteResult } from './types.js';
 
 const RESULTS_DIR = 'evals/results';
 
@@ -24,7 +24,7 @@ export function printTestSuiteResult(result: TestSuiteResult): void {
   console.log(`${'='.repeat(60)}`);
 
   const headers = ['Case', 'Score', 'Cost', 'Duration'];
-  const rows = result.cases.map(c => [
+  const rows = result.cases.map((c) => [
     c.caseId.slice(0, 20),
     formatScore(c.grade.score),
     `$${c.costUsd.toFixed(4)}`,
@@ -83,12 +83,14 @@ export function printComparisonResult(result: ComparisonResult): void {
   // Print rows
   for (const c of result.cases) {
     const winner = c.winner === 'tie' ? 'tie' : c.winner === 'A' ? result.promptA : result.promptB;
-    console.log([
-      c.caseId.slice(0, 22).padEnd(colWidths[0]),
-      formatScore(c.scoreA).padEnd(colWidths[1] + 9), // Account for ANSI codes
-      formatScore(c.scoreB).padEnd(colWidths[2] + 9),
-      winner.padEnd(colWidths[3]),
-    ].join(' | '));
+    console.log(
+      [
+        c.caseId.slice(0, 22).padEnd(colWidths[0]),
+        formatScore(c.scoreA).padEnd(colWidths[1] + 9), // Account for ANSI codes
+        formatScore(c.scoreB).padEnd(colWidths[2] + 9),
+        winner.padEnd(colWidths[3]),
+      ].join(' | ')
+    );
   }
 
   // Print summary
@@ -96,9 +98,10 @@ export function printComparisonResult(result: ComparisonResult): void {
   console.log(`Average A: ${formatScore(result.averageScoreA)}`);
   console.log(`Average B: ${formatScore(result.averageScoreB)}`);
 
-  const winnerStr = result.winner === 'tie'
-    ? 'Tie'
-    : `${result.winner === 'A' ? result.promptA : result.promptB} (+${result.percentDiff.toFixed(1)}%)`;
+  const winnerStr =
+    result.winner === 'tie'
+      ? 'Tie'
+      : `${result.winner === 'A' ? result.promptA : result.promptB} (+${result.percentDiff.toFixed(1)}%)`;
   console.log(`Winner: ${winnerStr}`);
 }
 
@@ -107,10 +110,7 @@ export function printComparisonResult(result: ComparisonResult): void {
  */
 function generateTimestamp(): string {
   const now = new Date();
-  return now.toISOString()
-    .replace(/[-:]/g, '')
-    .replace('T', '-')
-    .slice(0, 15);
+  return now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 }
 
 /**
@@ -139,7 +139,7 @@ export async function saveResults(
 export function generateMarkdownReport(result: EvalRunResult): string {
   const lines: string[] = [];
 
-  lines.push(`# Eval Run Report`);
+  lines.push('# Eval Run Report');
   lines.push(`\n**Timestamp:** ${result.timestamp}`);
   lines.push(`**Overall Score:** ${result.overallAverageScore.toFixed(2)}`);
   lines.push(`**Total Cost:** $${result.totalCostUsd.toFixed(4)}`);

@@ -1,6 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { TestCase, GradeResult } from './types.js';
 import { extractJSON } from '../utils/json-parser.js';
+import type { GradeResult, TestCase } from './types.js';
 
 const GRADER_PROMPT = `You are evaluating an AI's response.
 
@@ -32,9 +32,8 @@ interface GraderResponse {
 }
 
 function buildGraderPrompt(output: string, testCase: TestCase): string {
-  return GRADER_PROMPT
-    .replace('{{caseDescription}}', testCase.description)
-    .replace('{{criteria}}', testCase.grade.criteria.map(c => `- ${c}`).join('\n'))
+  return GRADER_PROMPT.replace('{{caseDescription}}', testCase.description)
+    .replace('{{criteria}}', testCase.grade.criteria.map((c) => `- ${c}`).join('\n'))
     .replace('{{rubric}}', testCase.grade.rubric)
     .replace('{{output}}', output);
 }

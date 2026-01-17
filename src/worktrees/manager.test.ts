@@ -1,10 +1,10 @@
-// src/worktrees/manager.test.ts
-import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+// src/worktrees/manager.test.ts
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import { WorktreeManager } from './manager.js';
 
 describe('WorktreeManager', () => {
@@ -16,7 +16,10 @@ describe('WorktreeManager', () => {
     // Create temp directory with a git repo
     testDir = mkdtempSync(join(tmpdir(), 'sq-worktree-test-'));
     repoDir = join(testDir, 'repo');
-    execSync(`mkdir -p ${repoDir} && cd ${repoDir} && git init && git commit --allow-empty -m "init"`, { stdio: 'pipe' });
+    execSync(
+      `mkdir -p ${repoDir} && cd ${repoDir} && git init && git commit --allow-empty -m "init"`,
+      { stdio: 'pipe' }
+    );
 
     worktreeManager = new WorktreeManager({
       repoDir,
@@ -42,7 +45,7 @@ describe('WorktreeManager', () => {
   describe('merge()', () => {
     it('merges worktree branch to base branch', async () => {
       // Create worktree
-      const { worktreePath, branchName } = await worktreeManager.create('loop-merge');
+      const { worktreePath } = await worktreeManager.create('loop-merge');
 
       // Make a change in the worktree
       execSync(`echo "test content" > test.txt && git add test.txt && git commit -m "add test"`, {
@@ -56,7 +59,7 @@ describe('WorktreeManager', () => {
       assert.strictEqual(result.status, 'success');
 
       // Verify file exists on base branch
-      const fileExists = execSync(`git show main:test.txt`, { cwd: repoDir, stdio: 'pipe' });
+      const fileExists = execSync('git show main:test.txt', { cwd: repoDir, stdio: 'pipe' });
       assert.ok(fileExists.toString().includes('test content'));
     });
 
@@ -65,16 +68,22 @@ describe('WorktreeManager', () => {
       const { worktreePath } = await worktreeManager.create('loop-conflict');
 
       // Make a change in the worktree
-      execSync(`echo "worktree change" > conflict.txt && git add conflict.txt && git commit -m "worktree"`, {
-        cwd: worktreePath,
-        stdio: 'pipe',
-      });
+      execSync(
+        `echo "worktree change" > conflict.txt && git add conflict.txt && git commit -m "worktree"`,
+        {
+          cwd: worktreePath,
+          stdio: 'pipe',
+        }
+      );
 
       // Make conflicting change on base branch
-      execSync(`echo "base change" > conflict.txt && git add conflict.txt && git commit -m "base"`, {
-        cwd: repoDir,
-        stdio: 'pipe',
-      });
+      execSync(
+        `echo "base change" > conflict.txt && git add conflict.txt && git commit -m "base"`,
+        {
+          cwd: repoDir,
+          stdio: 'pipe',
+        }
+      );
 
       // Attempt merge
       const result = await worktreeManager.merge('loop-conflict');
@@ -98,7 +107,10 @@ describe('WorktreeManager', () => {
       assert.ok(!existsSync(worktreePath));
 
       // Verify branch removed
-      const branches = execSync(`git branch --list "${branchName}"`, { cwd: repoDir, stdio: 'pipe' });
+      const branches = execSync(`git branch --list "${branchName}"`, {
+        cwd: repoDir,
+        stdio: 'pipe',
+      });
       assert.strictEqual(branches.toString().trim(), '');
     });
   });

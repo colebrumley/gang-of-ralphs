@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { EvalRunResult, Baseline } from './types.js';
+import type { Baseline, EvalRunResult } from './types.js';
 
 const BASELINE_FILE = 'evals/baseline.json';
 
@@ -64,7 +64,7 @@ export async function loadBaseline(baseDir: string = process.cwd()): Promise<Bas
  */
 export async function checkRegression(
   result: EvalRunResult,
-  threshold: number = 0.5,
+  threshold = 0.5,
   baseDir: string = process.cwd()
 ): Promise<boolean> {
   const baseline = await loadBaseline(baseDir);
@@ -135,7 +135,9 @@ export async function checkRegression(
   if (improvements.length > 0) {
     console.log('\nImprovements detected:');
     for (const i of improvements) {
-      console.log(`  ${i.key}: ${i.baseline.toFixed(2)} → ${i.current.toFixed(2)} (+${i.diff.toFixed(2)})`);
+      console.log(
+        `  ${i.key}: ${i.baseline.toFixed(2)} → ${i.current.toFixed(2)} (+${i.diff.toFixed(2)})`
+      );
     }
   }
 
@@ -147,7 +149,7 @@ export async function checkRegression(
  */
 export async function getRegressionReport(
   result: EvalRunResult,
-  threshold: number = 0.5,
+  threshold = 0.5,
   baseDir: string = process.cwd()
 ): Promise<{
   hasRegressions: boolean;
@@ -178,7 +180,12 @@ export async function getRegressionReport(
     const diff = currentScore - baselineScore;
 
     if (diff < -threshold) {
-      regressions.push({ key, baseline: baselineScore, current: currentScore, diff: Math.abs(diff) });
+      regressions.push({
+        key,
+        baseline: baselineScore,
+        current: currentScore,
+        diff: Math.abs(diff),
+      });
     } else if (diff > threshold) {
       improvements.push({ key, baseline: baselineScore, current: currentScore, diff });
     } else {

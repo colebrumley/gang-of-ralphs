@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import * as prompts from '../agents/prompts.js';
-import type { TestSuite, TestCase, TestCaseResult, TestSuiteResult } from './types.js';
 import { gradeOutput } from './grader.js';
+import type { TestCase, TestCaseResult, TestSuite, TestSuiteResult } from './types.js';
 
 const PROMPTS_DIR = 'evals/prompts';
 
@@ -11,7 +11,10 @@ const PROMPTS_DIR = 'evals/prompts';
  * Resolve a prompt name to its content.
  * First checks built-in prompts, then looks for a file in evals/prompts/
  */
-export async function resolvePrompt(promptName: string, baseDir: string = process.cwd()): Promise<string> {
+export async function resolvePrompt(
+  promptName: string,
+  baseDir: string = process.cwd()
+): Promise<string> {
   // Check if it's a built-in prompt
   if (promptName in prompts) {
     return (prompts as Record<string, string>)[promptName];

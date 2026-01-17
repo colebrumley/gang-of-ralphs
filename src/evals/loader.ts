@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import type { TestSuite, TestCase, GradeConfig, TestCaseInput } from './types.js';
+import type { GradeConfig, TestCase, TestCaseInput, TestSuite } from './types.js';
 
 const CASES_DIR = 'evals/cases';
 
@@ -26,7 +26,9 @@ function validateTestCase(raw: RawTestCase, suiteName: string): TestCase {
     throw new Error(`Invalid test case in ${suiteName}: missing or invalid 'id'`);
   }
   if (!raw.description || typeof raw.description !== 'string') {
-    throw new Error(`Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'description'`);
+    throw new Error(
+      `Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'description'`
+    );
   }
   if (!raw.input || typeof raw.input !== 'object') {
     throw new Error(`Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'input'`);
@@ -35,10 +37,14 @@ function validateTestCase(raw: RawTestCase, suiteName: string): TestCase {
     throw new Error(`Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'grade'`);
   }
   if (!Array.isArray(raw.grade.criteria) || raw.grade.criteria.length === 0) {
-    throw new Error(`Invalid test case ${raw.id} in ${suiteName}: 'grade.criteria' must be a non-empty array`);
+    throw new Error(
+      `Invalid test case ${raw.id} in ${suiteName}: 'grade.criteria' must be a non-empty array`
+    );
   }
   if (!raw.grade.rubric || typeof raw.grade.rubric !== 'string') {
-    throw new Error(`Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'grade.rubric'`);
+    throw new Error(
+      `Invalid test case ${raw.id} in ${suiteName}: missing or invalid 'grade.rubric'`
+    );
   }
 
   return {
@@ -63,7 +69,7 @@ function validateTestSuite(raw: RawTestSuite, filename: string): TestSuite {
   return {
     name: raw.name,
     prompt: raw.prompt,
-    cases: raw.cases.map(c => validateTestCase(c, raw.name)),
+    cases: raw.cases.map((c) => validateTestCase(c, raw.name)),
   };
 }
 
@@ -82,7 +88,7 @@ export async function loadTestSuite(filePath: string): Promise<TestSuite> {
 export async function loadAllTestSuites(baseDir: string = process.cwd()): Promise<TestSuite[]> {
   const casesDir = join(baseDir, CASES_DIR);
   const files = await readdir(casesDir);
-  const yamlFiles = files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+  const yamlFiles = files.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
 
   const suites: TestSuite[] = [];
   for (const file of yamlFiles) {
@@ -96,12 +102,12 @@ export async function loadAllTestSuites(baseDir: string = process.cwd()): Promis
 /**
  * Load a specific test suite by name
  */
-export async function loadTestSuiteByName(name: string, baseDir: string = process.cwd()): Promise<TestSuite> {
+export async function loadTestSuiteByName(
+  name: string,
+  baseDir: string = process.cwd()
+): Promise<TestSuite> {
   const casesDir = join(baseDir, CASES_DIR);
-  const possiblePaths = [
-    join(casesDir, `${name}.yaml`),
-    join(casesDir, `${name}.yml`),
-  ];
+  const possiblePaths = [join(casesDir, `${name}.yaml`), join(casesDir, `${name}.yml`)];
 
   for (const path of possiblePaths) {
     try {

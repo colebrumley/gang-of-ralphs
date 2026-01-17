@@ -1,6 +1,6 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import type { ReviewIssue, OrchestratorContext } from './state.js';
+import { describe, test } from 'node:test';
+import type { OrchestratorContext, ReviewIssue } from './state.js';
 
 describe('State Types', () => {
   test('ReviewIssue has required fields', () => {

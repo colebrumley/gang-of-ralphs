@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Task, LoopState } from '../types/index.js';
+import type { LoopState, Task } from '../types/index.js';
 import type { WorktreeManager } from '../worktrees/manager.js';
 
 export interface LoopManagerConfig {
@@ -18,7 +18,7 @@ export class LoopManager {
     this.worktreeManager = worktreeManager ?? null;
   }
 
-  async createLoop(taskIds: string[], tasks: Task[]): Promise<LoopState> {
+  async createLoop(taskIds: string[], tasks: Task[], phase = 'build'): Promise<LoopState> {
     const loopId = randomUUID();
     let worktreePath: string | null = null;
 
@@ -44,6 +44,7 @@ export class LoopManager {
       },
       output: [],
       worktreePath,
+      phase,
     };
 
     this.loops.set(loopId, loop);
@@ -63,8 +64,7 @@ export class LoopManager {
   }
 
   canSpawnMore(): boolean {
-    const activeCount = this.getActiveLoops().length +
-                        this.getPendingLoops().length;
+    const activeCount = this.getActiveLoops().length + this.getPendingLoops().length;
     return activeCount < this.config.maxLoops;
   }
 
@@ -77,11 +77,11 @@ export class LoopManager {
   }
 
   getActiveLoops(): LoopState[] {
-    return this.getAllLoops().filter(l => l.status === 'running');
+    return this.getAllLoops().filter((l) => l.status === 'running');
   }
 
   getPendingLoops(): LoopState[] {
-    return this.getAllLoops().filter(l => l.status === 'pending');
+    return this.getAllLoops().filter((l) => l.status === 'pending');
   }
 
   updateLoopStatus(loopId: string, status: LoopState['status']): void {
@@ -102,7 +102,7 @@ export class LoopManager {
     const loop = this.loops.get(loopId);
     if (!loop) return false;
 
-    return (loop.iteration - loop.lastReviewAt) >= loop.reviewInterval;
+    return loop.iteration - loop.lastReviewAt >= loop.reviewInterval;
   }
 
   markReviewed(loopId: string): void {
