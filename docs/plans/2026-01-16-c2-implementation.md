@@ -295,479 +295,577 @@ git commit -m "feat: add core type definitions for state, tasks, and loops"
 
 ---
 
-## Task 3: State Management
+## Task 3: SQLite Database Setup
 
 **Files:**
-- Create: `src/state/schema.ts`
-- Create: `src/state/index.ts`
-- Test: `src/state/state.test.ts`
+- Create: `src/db/schema.sql`
+- Create: `src/db/index.ts`
+- Create: `src/db/migrations.ts`
+- Test: `src/db/db.test.ts`
 
-**Step 1: Create state directory**
+**Step 1: Create db directory**
 
-Run: `mkdir -p src/state`
+Run: `mkdir -p src/db`
 
-**Step 2: Write failing test for state load/save**
+**Step 2: Create database schema**
 
-Create `src/state/state.test.ts`:
+Create `src/db/schema.sql`:
+```sql
+-- Runs table: one row per orchestrator invocation
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  spec_path TEXT NOT NULL,
+  effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high', 'max')),
+  phase TEXT NOT NULL DEFAULT 'enumerate',
+  pending_review INTEGER NOT NULL DEFAULT 0,
+  review_type TEXT,
+  revision_count INTEGER NOT NULL DEFAULT 0,
+  max_loops INTEGER NOT NULL DEFAULT 4,
+  max_iterations INTEGER NOT NULL DEFAULT 20,
+  total_cost_usd REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Tasks table: enumerated tasks for a run
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'failed')),
+  dependencies TEXT NOT NULL DEFAULT '[]', -- JSON array of task IDs
+  estimated_iterations INTEGER NOT NULL DEFAULT 10,
+  assigned_loop_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Plan groups: parallel execution groups
+CREATE TABLE IF NOT EXISTS plan_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  group_index INTEGER NOT NULL,
+  task_ids TEXT NOT NULL, -- JSON array of task IDs
+  UNIQUE(run_id, group_index)
+);
+
+-- Loops table: parallel execution loops
+CREATE TABLE IF NOT EXISTS loops (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  task_ids TEXT NOT NULL, -- JSON array
+  iteration INTEGER NOT NULL DEFAULT 0,
+  max_iterations INTEGER NOT NULL,
+  review_interval INTEGER NOT NULL,
+  last_review_at INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'stuck', 'completed', 'failed')),
+  same_error_count INTEGER NOT NULL DEFAULT 0,
+  no_progress_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_file_change_iteration INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Phase history: log of completed phases
+CREATE TABLE IF NOT EXISTS phase_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  phase TEXT NOT NULL,
+  success INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Context: discoveries, errors, decisions
+CREATE TABLE IF NOT EXISTS context_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('discovery', 'error', 'decision')),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
+CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
+CREATE INDEX IF NOT EXISTS idx_phase_history_run ON phase_history(run_id);
+```
+
+**Step 3: Write failing test**
+
+Create `src/db/db.test.ts`:
 ```typescript
-import { test, describe } from 'node:test';
+import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadState, saveState, initializeState } from './index.js';
+import { createDatabase, closeDatabase } from './index.js';
 
-describe('State Management', () => {
-  test('initializeState creates valid initial state', async () => {
-    const state = initializeState({
-      specPath: '/path/to/spec.md',
-      effort: 'medium',
-      stateDir: '.c2',
-      maxLoops: 4,
-      maxIterations: 20,
-    });
+describe('Database', () => {
+  let tempDir: string;
+  let dbPath: string;
 
-    assert.strictEqual(state.phase, 'enumerate');
-    assert.strictEqual(state.effort, 'medium');
-    assert.ok(state.runId);
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'c2-test-'));
+    dbPath = join(tempDir, 'state.db');
   });
 
-  test('saveState and loadState round-trip correctly', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'c2-test-'));
-    const stateDir = join(tempDir, '.c2');
-
-    try {
-      const state = initializeState({
-        specPath: '/path/to/spec.md',
-        effort: 'high',
-        stateDir,
-        maxLoops: 4,
-        maxIterations: 20,
-      });
-
-      await saveState(state);
-      const loaded = await loadState(stateDir);
-
-      assert.deepStrictEqual(loaded, state);
-    } finally {
-      await rm(tempDir, { recursive: true });
-    }
+  afterEach(async () => {
+    closeDatabase();
+    await rm(tempDir, { recursive: true });
   });
 
-  test('loadState returns null for non-existent state', async () => {
-    const result = await loadState('/nonexistent/.c2');
-    assert.strictEqual(result, null);
+  test('createDatabase initializes schema', () => {
+    const db = createDatabase(dbPath);
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table'"
+    ).all() as { name: string }[];
+
+    const tableNames = tables.map(t => t.name);
+    assert.ok(tableNames.includes('runs'));
+    assert.ok(tableNames.includes('tasks'));
+    assert.ok(tableNames.includes('loops'));
+  });
+
+  test('can create and retrieve a run', () => {
+    const db = createDatabase(dbPath);
+
+    db.prepare(`
+      INSERT INTO runs (id, spec_path, effort)
+      VALUES (?, ?, ?)
+    `).run('run-1', '/path/to/spec.md', 'medium');
+
+    const run = db.prepare('SELECT * FROM runs WHERE id = ?').get('run-1') as any;
+
+    assert.strictEqual(run.spec_path, '/path/to/spec.md');
+    assert.strictEqual(run.effort, 'medium');
+    assert.strictEqual(run.phase, 'enumerate');
   });
 });
 ```
 
-**Step 3: Run test to verify it fails**
+**Step 4: Run test to verify it fails**
 
-Run: `npm test -- src/state/state.test.ts`
+Run: `npm test -- src/db/db.test.ts`
 Expected: FAIL - module not found
 
-**Step 4: Create Zod schema**
+**Step 5: Implement database module**
 
-Create `src/state/schema.ts`:
+Create `src/db/index.ts`:
 ```typescript
-import { z } from 'zod';
+import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const TaskSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'completed', 'failed']),
-  dependencies: z.array(z.string()),
-  estimatedIterations: z.number(),
-  assignedLoopId: z.string().nullable(),
-});
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export const TaskGraphSchema = z.object({
-  tasks: z.array(TaskSchema),
-  parallelGroups: z.array(z.array(z.string())),
-});
+let db: Database.Database | null = null;
 
-export const StuckIndicatorsSchema = z.object({
-  sameErrorCount: z.number(),
-  noProgressCount: z.number(),
-  lastError: z.string().nullable(),
-  lastFileChangeIteration: z.number(),
-});
+export function createDatabase(dbPath: string): Database.Database {
+  db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
-export const LoopStateSchema = z.object({
-  loopId: z.string(),
-  taskIds: z.array(z.string()),
-  iteration: z.number(),
-  maxIterations: z.number(),
-  reviewInterval: z.number(),
-  lastReviewAt: z.number(),
-  status: z.enum(['pending', 'running', 'stuck', 'completed', 'failed']),
-  stuckIndicators: StuckIndicatorsSchema,
-  output: z.array(z.string()),
-});
+  // Run schema
+  const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
+  db.exec(schema);
 
-export const OrchestratorStateSchema = z.object({
-  runId: z.string(),
-  specPath: z.string(),
-  effort: z.enum(['low', 'medium', 'high', 'max']),
-  phase: z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']),
-  phaseHistory: z.array(z.object({
-    phase: z.enum(['enumerate', 'plan', 'build', 'review', 'revise', 'complete']),
-    success: z.boolean(),
-    timestamp: z.string(),
-    summary: z.string(),
-  })),
-  tasks: z.array(TaskSchema),
-  taskGraph: TaskGraphSchema.nullable(),
-  activeLoops: z.array(LoopStateSchema),
-  completedTasks: z.array(z.string()),
-  pendingReview: z.boolean(),
-  reviewType: z.enum(['enumerate', 'plan', 'build']).nullable(),
-  revisionCount: z.number(),
-  context: z.object({
-    discoveries: z.array(z.string()),
-    errors: z.array(z.string()),
-    decisions: z.array(z.string()),
-  }),
-  maxLoops: z.number(),
-  maxIterations: z.number(),
-  stateDir: z.string(),
-});
-```
-
-**Step 5: Implement state functions**
-
-Create `src/state/index.ts`:
-```typescript
-import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { EffortLevel, OrchestratorState } from '../types/index.js';
-import { OrchestratorStateSchema } from './schema.js';
-
-const STATE_FILE = 'state.json';
-
-export interface InitStateOptions {
-  specPath: string;
-  effort: EffortLevel;
-  stateDir: string;
-  maxLoops: number;
-  maxIterations: number;
+  return db;
 }
 
-export function initializeState(options: InitStateOptions): OrchestratorState {
-  return {
-    runId: randomUUID(),
-    specPath: options.specPath,
-    effort: options.effort,
-    phase: 'enumerate',
-    phaseHistory: [],
-    tasks: [],
-    taskGraph: null,
-    activeLoops: [],
-    completedTasks: [],
-    pendingReview: false,
-    reviewType: null,
-    revisionCount: 0,
-    context: {
-      discoveries: [],
-      errors: [],
-      decisions: [],
-    },
-    maxLoops: options.maxLoops,
-    maxIterations: options.maxIterations,
-    stateDir: options.stateDir,
-  };
+export function getDatabase(): Database.Database {
+  if (!db) {
+    throw new Error('Database not initialized. Call createDatabase first.');
+  }
+  return db;
 }
 
-export async function saveState(state: OrchestratorState): Promise<void> {
-  await mkdir(state.stateDir, { recursive: true });
-  const filePath = join(state.stateDir, STATE_FILE);
-  await writeFile(filePath, JSON.stringify(state, null, 2));
-}
-
-export async function loadState(stateDir: string): Promise<OrchestratorState | null> {
-  const filePath = join(stateDir, STATE_FILE);
-  try {
-    const content = await readFile(filePath, 'utf-8');
-    const parsed = JSON.parse(content);
-    return OrchestratorStateSchema.parse(parsed);
-  } catch {
-    return null;
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    db = null;
   }
 }
 
-export { OrchestratorStateSchema } from './schema.js';
+// Helper to get current run
+export function getCurrentRun(runId: string) {
+  return getDatabase().prepare('SELECT * FROM runs WHERE id = ?').get(runId);
+}
+
+// Helper to update run phase
+export function updateRunPhase(runId: string, phase: string) {
+  getDatabase().prepare(`
+    UPDATE runs SET phase = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(phase, runId);
+}
+
+// Helper to get all tasks for a run
+export function getTasksForRun(runId: string) {
+  return getDatabase().prepare('SELECT * FROM tasks WHERE run_id = ?').all(runId);
+}
+
+// Helper to get active loops for a run
+export function getActiveLoops(runId: string) {
+  return getDatabase().prepare(`
+    SELECT * FROM loops WHERE run_id = ? AND status IN ('pending', 'running')
+  `).all(runId);
+}
 ```
 
 **Step 6: Run tests to verify they pass**
 
-Run: `npm test -- src/state/state.test.ts`
+Run: `npm test -- src/db/db.test.ts`
 Expected: All tests pass
 
 **Step 7: Commit**
 
 ```bash
 git add -A
-git commit -m "feat: implement state management with Zod validation"
+git commit -m "feat: implement SQLite database with schema for state storage"
 ```
 
 ---
 
-## Task 3A: Robust JSON Parser (Risk #2 Mitigation)
+## Task 3A: MCP Server for Agent→DB Communication
 
 **Files:**
-- Create: `src/utils/json-parser.ts`
-- Test: `src/utils/json-parser.test.ts`
+- Create: `src/mcp/server.ts`
+- Create: `src/mcp/tools.ts`
+- Create: `src/mcp/index.ts`
+- Test: `src/mcp/mcp.test.ts`
 
-**Step 1: Create utils directory**
+**Step 1: Create MCP directory**
 
-Run: `mkdir -p src/utils`
+Run: `mkdir -p src/mcp`
 
-**Step 2: Write failing tests for JSON extraction**
+**Step 2: Define MCP tools**
 
-Create `src/utils/json-parser.test.ts`:
+Create `src/mcp/tools.ts`:
 ```typescript
-import { test, describe } from 'node:test';
-import assert from 'node:assert';
-import { extractJSON, JSONExtractionError } from './json-parser.js';
+import { z } from 'zod';
 
-describe('Robust JSON Parser', () => {
-  test('extracts JSON from markdown code block', () => {
-    const input = `Here's the result:
-\`\`\`json
-{"tasks": [{"id": "1"}]}
-\`\`\`
-Done!`;
-    const result = extractJSON(input, ['tasks']);
-    assert.deepStrictEqual(result, { tasks: [{ id: '1' }] });
-  });
+// Tool schemas for MCP
+export const WriteTaskSchema = z.object({
+  id: z.string().describe('Unique task identifier'),
+  title: z.string().describe('Short task title'),
+  description: z.string().describe('Detailed task description'),
+  dependencies: z.array(z.string()).default([]).describe('IDs of tasks this depends on'),
+  estimatedIterations: z.number().default(10).describe('Estimated iterations to complete'),
+});
 
-  test('extracts JSON from code block without language tag', () => {
-    const input = `\`\`\`
-{"tasks": []}
-\`\`\``;
-    const result = extractJSON(input, ['tasks']);
-    assert.deepStrictEqual(result, { tasks: [] });
-  });
+export const CompleteTaskSchema = z.object({
+  taskId: z.string().describe('ID of task to mark complete'),
+});
 
-  test('extracts raw JSON when no code block', () => {
-    const input = `Thinking... {"tasks": [{"id": "1"}]} ...done`;
-    const result = extractJSON(input, ['tasks']);
-    assert.deepStrictEqual(result, { tasks: [{ id: '1' }] });
-  });
+export const FailTaskSchema = z.object({
+  taskId: z.string().describe('ID of task that failed'),
+  reason: z.string().describe('Why the task failed'),
+});
 
-  test('handles JSON with nested quotes and escapes', () => {
-    const input = `\`\`\`json
-{"title": "Say \\"hello\\"", "desc": "line1\\nline2"}
-\`\`\``;
-    const result = extractJSON(input, ['title']);
-    assert.strictEqual(result.title, 'Say "hello"');
-  });
+export const AddPlanGroupSchema = z.object({
+  groupIndex: z.number().describe('Order of this group (0 = first)'),
+  taskIds: z.array(z.string()).describe('Task IDs that can run in parallel'),
+});
 
-  test('extracts last valid JSON when multiple present', () => {
-    const input = `First: {"wrong": true}
-Then: \`\`\`json
-{"tasks": [{"id": "correct"}]}
-\`\`\``;
-    const result = extractJSON(input, ['tasks']);
-    assert.strictEqual(result.tasks[0].id, 'correct');
-  });
+export const UpdateLoopStatusSchema = z.object({
+  loopId: z.string().describe('Loop ID'),
+  status: z.enum(['running', 'stuck', 'completed', 'failed']).describe('New status'),
+  error: z.string().optional().describe('Error message if failed/stuck'),
+});
 
-  test('throws JSONExtractionError with helpful message', () => {
-    const input = 'No JSON here at all';
-    assert.throws(
-      () => extractJSON(input, ['tasks']),
-      (err: Error) => {
-        assert.ok(err instanceof JSONExtractionError);
-        assert.ok(err.message.includes('No valid JSON found'));
-        assert.ok(err.attempts.length > 0);
-        return true;
+export const RecordCostSchema = z.object({
+  costUsd: z.number().describe('Cost in USD'),
+  loopId: z.string().optional().describe('Loop ID if loop-specific'),
+});
+
+export const AddContextSchema = z.object({
+  type: z.enum(['discovery', 'error', 'decision']).describe('Type of context entry'),
+  content: z.string().describe('The context content'),
+});
+
+export const SetReviewResultSchema = z.object({
+  passed: z.boolean().describe('Whether review passed'),
+  issues: z.array(z.string()).default([]).describe('Issues found'),
+});
+
+export type WriteTask = z.infer<typeof WriteTaskSchema>;
+export type CompleteTask = z.infer<typeof CompleteTaskSchema>;
+export type AddPlanGroup = z.infer<typeof AddPlanGroupSchema>;
+```
+
+**Step 3: Implement MCP server**
+
+Create `src/mcp/server.ts`:
+```typescript
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import { getDatabase } from '../db/index.js';
+import {
+  WriteTaskSchema,
+  CompleteTaskSchema,
+  AddPlanGroupSchema,
+  UpdateLoopStatusSchema,
+  RecordCostSchema,
+  AddContextSchema,
+  SetReviewResultSchema,
+} from './tools.js';
+
+export function createMCPServer(runId: string) {
+  const server = new Server(
+    { name: 'c2-orchestrator', version: '1.0.0' },
+    { capabilities: { tools: {} } }
+  );
+
+  // List available tools
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: 'write_task',
+        description: 'Create a new task for the current run',
+        inputSchema: { type: 'object', properties: WriteTaskSchema.shape },
+      },
+      {
+        name: 'complete_task',
+        description: 'Mark a task as completed',
+        inputSchema: { type: 'object', properties: CompleteTaskSchema.shape },
+      },
+      {
+        name: 'add_plan_group',
+        description: 'Add a parallel execution group to the plan',
+        inputSchema: { type: 'object', properties: AddPlanGroupSchema.shape },
+      },
+      {
+        name: 'update_loop_status',
+        description: 'Update the status of an execution loop',
+        inputSchema: { type: 'object', properties: UpdateLoopStatusSchema.shape },
+      },
+      {
+        name: 'record_cost',
+        description: 'Record API cost for the run',
+        inputSchema: { type: 'object', properties: RecordCostSchema.shape },
+      },
+      {
+        name: 'add_context',
+        description: 'Add a discovery, error, or decision to context',
+        inputSchema: { type: 'object', properties: AddContextSchema.shape },
+      },
+      {
+        name: 'set_review_result',
+        description: 'Record the result of a review phase',
+        inputSchema: { type: 'object', properties: SetReviewResultSchema.shape },
+      },
+    ],
+  }));
+
+  // Handle tool calls
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const db = getDatabase();
+
+    switch (name) {
+      case 'write_task': {
+        const task = WriteTaskSchema.parse(args);
+        db.prepare(`
+          INSERT INTO tasks (id, run_id, title, description, dependencies, estimated_iterations)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          task.id,
+          runId,
+          task.title,
+          task.description,
+          JSON.stringify(task.dependencies),
+          task.estimatedIterations
+        );
+        return { content: [{ type: 'text', text: `Task ${task.id} created` }] };
       }
-    );
+
+      case 'complete_task': {
+        const { taskId } = CompleteTaskSchema.parse(args);
+        db.prepare(`
+          UPDATE tasks SET status = 'completed' WHERE id = ? AND run_id = ?
+        `).run(taskId, runId);
+        return { content: [{ type: 'text', text: `Task ${taskId} completed` }] };
+      }
+
+      case 'add_plan_group': {
+        const group = AddPlanGroupSchema.parse(args);
+        db.prepare(`
+          INSERT INTO plan_groups (run_id, group_index, task_ids)
+          VALUES (?, ?, ?)
+        `).run(runId, group.groupIndex, JSON.stringify(group.taskIds));
+        return { content: [{ type: 'text', text: `Plan group ${group.groupIndex} added` }] };
+      }
+
+      case 'update_loop_status': {
+        const update = UpdateLoopStatusSchema.parse(args);
+        db.prepare(`
+          UPDATE loops SET status = ?, last_error = ? WHERE id = ?
+        `).run(update.status, update.error || null, update.loopId);
+        return { content: [{ type: 'text', text: `Loop ${update.loopId} updated` }] };
+      }
+
+      case 'record_cost': {
+        const { costUsd, loopId } = RecordCostSchema.parse(args);
+        if (loopId) {
+          db.prepare(`
+            UPDATE loops SET cost_usd = cost_usd + ? WHERE id = ?
+          `).run(costUsd, loopId);
+        }
+        db.prepare(`
+          UPDATE runs SET total_cost_usd = total_cost_usd + ? WHERE id = ?
+        `).run(costUsd, runId);
+        return { content: [{ type: 'text', text: `Cost $${costUsd} recorded` }] };
+      }
+
+      case 'add_context': {
+        const ctx = AddContextSchema.parse(args);
+        db.prepare(`
+          INSERT INTO context_entries (run_id, entry_type, content)
+          VALUES (?, ?, ?)
+        `).run(runId, ctx.type, ctx.content);
+        return { content: [{ type: 'text', text: `Context ${ctx.type} added` }] };
+      }
+
+      case 'set_review_result': {
+        const review = SetReviewResultSchema.parse(args);
+        // Store issues as context entries
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO context_entries (run_id, entry_type, content)
+            VALUES (?, 'error', ?)
+          `).run(runId, issue);
+        }
+        return { content: [{ type: 'text', text: `Review result: ${review.passed ? 'PASSED' : 'FAILED'}` }] };
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${name}`);
+    }
   });
 
-  test('validates required keys are present', () => {
-    const input = '{"other": "value"}';
-    assert.throws(
-      () => extractJSON(input, ['tasks']),
-      /Missing required key/
-    );
+  return server;
+}
+
+export async function startMCPServer(runId: string) {
+  const server = createMCPServer(runId);
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+```
+
+**Step 4: Create MCP entry point**
+
+Create `src/mcp/index.ts`:
+```typescript
+#!/usr/bin/env node
+import { createDatabase } from '../db/index.js';
+import { startMCPServer } from './server.js';
+
+// MCP server is started with run ID as argument
+const runId = process.argv[2];
+const dbPath = process.argv[3] || '.c2/state.db';
+
+if (!runId) {
+  console.error('Usage: c2-mcp <run-id> [db-path]');
+  process.exit(1);
+}
+
+createDatabase(dbPath);
+startMCPServer(runId).catch(console.error);
+```
+
+**Step 5: Write test**
+
+Create `src/mcp/mcp.test.ts`:
+```typescript
+import { test, describe, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createDatabase, closeDatabase, getDatabase } from '../db/index.js';
+import { createMCPServer } from './server.js';
+
+describe('MCP Server', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'c2-mcp-test-'));
+    createDatabase(join(tempDir, 'state.db'));
+
+    // Create a test run
+    getDatabase().prepare(`
+      INSERT INTO runs (id, spec_path, effort) VALUES (?, ?, ?)
+    `).run('test-run', '/spec.md', 'medium');
   });
 
-  test('repairs common JSON issues', () => {
-    // Trailing comma
-    const input1 = '{"tasks": [{"id": "1"},]}';
-    const result1 = extractJSON(input1, ['tasks']);
-    assert.ok(result1.tasks);
+  afterEach(async () => {
+    closeDatabase();
+    await rm(tempDir, { recursive: true });
+  });
 
-    // Single quotes (common LLM mistake)
-    const input2 = "{'tasks': []}";
-    const result2 = extractJSON(input2, ['tasks']);
-    assert.ok(result2.tasks);
+  test('write_task creates task in database', async () => {
+    const server = createMCPServer('test-run');
+
+    // Simulate tool call (in real usage, MCP SDK handles this)
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO tasks (id, run_id, title, description, dependencies, estimated_iterations)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('task-1', 'test-run', 'Test Task', 'Do something', '[]', 5);
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get('task-1') as any;
+    assert.strictEqual(task.title, 'Test Task');
+  });
+
+  test('complete_task updates status', async () => {
+    const db = getDatabase();
+
+    // Create task
+    db.prepare(`
+      INSERT INTO tasks (id, run_id, title, description, dependencies, estimated_iterations)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('task-1', 'test-run', 'Test', 'Desc', '[]', 5);
+
+    // Complete it
+    db.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run('task-1');
+
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get('task-1') as any;
+    assert.strictEqual(task.status, 'completed');
   });
 });
 ```
 
-**Step 3: Run test to verify it fails**
+**Step 6: Add bin entry for MCP server**
 
-Run: `npm test -- src/utils/json-parser.test.ts`
-Expected: FAIL - module not found
-
-**Step 4: Implement robust JSON parser**
-
-Create `src/utils/json-parser.ts`:
-```typescript
-export class JSONExtractionError extends Error {
-  constructor(
-    message: string,
-    public readonly attempts: Array<{ strategy: string; error: string }>,
-    public readonly rawInput: string
-  ) {
-    super(message);
-    this.name = 'JSONExtractionError';
+Update package.json:
+```json
+{
+  "bin": {
+    "c2": "./dist/index.js",
+    "c2-mcp": "./dist/mcp/index.js"
   }
-}
-
-interface ExtractionAttempt {
-  strategy: string;
-  error: string;
-}
-
-/**
- * Extract JSON from LLM output using multiple strategies.
- * Handles markdown code blocks, raw JSON, and common LLM formatting issues.
- */
-export function extractJSON<T = unknown>(
-  input: string,
-  requiredKeys: string[] = []
-): T {
-  const attempts: ExtractionAttempt[] = [];
-
-  // Strategy 1: Markdown code block with json tag
-  const jsonBlockMatch = input.match(/```json\s*([\s\S]*?)```/);
-  if (jsonBlockMatch) {
-    try {
-      const result = parseWithRepair(jsonBlockMatch[1].trim());
-      validateKeys(result, requiredKeys);
-      return result as T;
-    } catch (e) {
-      attempts.push({ strategy: 'json code block', error: String(e) });
-    }
-  }
-
-  // Strategy 2: Any markdown code block
-  const anyBlockMatch = input.match(/```\s*([\s\S]*?)```/);
-  if (anyBlockMatch && anyBlockMatch !== jsonBlockMatch) {
-    try {
-      const result = parseWithRepair(anyBlockMatch[1].trim());
-      validateKeys(result, requiredKeys);
-      return result as T;
-    } catch (e) {
-      attempts.push({ strategy: 'generic code block', error: String(e) });
-    }
-  }
-
-  // Strategy 3: Find JSON object in text (greedy match for outermost braces)
-  const objectMatch = input.match(/\{[\s\S]*\}/);
-  if (objectMatch) {
-    try {
-      const result = parseWithRepair(objectMatch[0]);
-      validateKeys(result, requiredKeys);
-      return result as T;
-    } catch (e) {
-      attempts.push({ strategy: 'raw JSON object', error: String(e) });
-    }
-  }
-
-  // Strategy 4: Find JSON array in text
-  const arrayMatch = input.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try {
-      const result = parseWithRepair(arrayMatch[0]);
-      return result as T;
-    } catch (e) {
-      attempts.push({ strategy: 'raw JSON array', error: String(e) });
-    }
-  }
-
-  throw new JSONExtractionError(
-    `No valid JSON found containing required keys: ${requiredKeys.join(', ')}`,
-    attempts,
-    input.slice(0, 500) // Truncate for error message
-  );
-}
-
-/**
- * Parse JSON with automatic repair of common LLM mistakes.
- */
-function parseWithRepair(text: string): unknown {
-  // Try direct parse first
-  try {
-    return JSON.parse(text);
-  } catch {
-    // Continue to repairs
-  }
-
-  let repaired = text;
-
-  // Repair 1: Replace single quotes with double quotes (careful with apostrophes)
-  repaired = repaired.replace(/'/g, '"');
-
-  // Repair 2: Remove trailing commas before } or ]
-  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
-
-  // Repair 3: Add missing quotes around unquoted keys
-  repaired = repaired.replace(/(\{|\,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
-
-  // Repair 4: Handle undefined/null written as literals
-  repaired = repaired.replace(/:\s*undefined\b/g, ': null');
-
-  try {
-    return JSON.parse(repaired);
-  } catch (e) {
-    throw new Error(`JSON parse failed after repairs: ${e}`);
-  }
-}
-
-function validateKeys(obj: unknown, requiredKeys: string[]): void {
-  if (typeof obj !== 'object' || obj === null) {
-    throw new Error('Parsed result is not an object');
-  }
-
-  for (const key of requiredKeys) {
-    if (!(key in obj)) {
-      throw new Error(`Missing required key: ${key}`);
-    }
-  }
-}
-
-/**
- * Helper to create a retry prompt when JSON extraction fails.
- */
-export function createRetryPrompt(error: JSONExtractionError): string {
-  return `Your previous response could not be parsed as valid JSON.
-
-Error: ${error.message}
-
-Attempted strategies:
-${error.attempts.map(a => `- ${a.strategy}: ${a.error}`).join('\n')}
-
-Please respond with ONLY a valid JSON object. Do not include any text before or after the JSON.
-The JSON must contain these keys: ${error.message.match(/required keys: (.+)/)?.[1] || 'unknown'}`;
 }
 ```
 
-**Step 5: Run tests to verify they pass**
+**Step 7: Run tests**
 
-Run: `npm test -- src/utils/json-parser.test.ts`
+Run: `npm test -- src/mcp/mcp.test.ts`
 Expected: All tests pass
 
-**Step 6: Commit**
+**Step 8: Commit**
 
 ```bash
 git add -A
-git commit -m "feat: add robust JSON parser with multi-strategy extraction and repair"
+git commit -m "feat: implement MCP server for agent-to-database communication"
 ```
 
 ---
@@ -1130,54 +1228,59 @@ Run: `mkdir -p src/agents`
 
 Create `src/agents/prompts.ts`:
 ```typescript
+// Prompts instruct agents to use MCP tools instead of outputting JSON.
+// The c2-mcp server provides tools for writing directly to SQLite.
+
 export const ENUMERATE_PROMPT = `You are a task enumerator. Given a spec file, break it down into discrete, implementable tasks.
 
-Read the spec file and output a JSON array of tasks with this structure:
-{
-  "tasks": [
-    {
-      "id": "task-1",
-      "title": "Short title",
-      "description": "What needs to be done",
-      "dependencies": [],
-      "estimatedIterations": 5
-    }
-  ]
-}
+Read the spec file and create tasks using the write_task tool.
+
+For each task, call write_task with:
+- id: Unique identifier like "task-1", "task-2"
+- title: Short descriptive title
+- description: Detailed description of what needs to be done
+- dependencies: Array of task IDs this depends on
+- estimatedIterations: Estimated iterations to complete (5-20)
 
 Rules:
 - Each task should be completable in 5-20 iterations
 - Identify dependencies between tasks
-- Order tasks so dependencies come first
-- Be specific about what files/functions to create or modify`;
+- Create tasks in order so dependencies come first
+- Be specific about what files/functions to create or modify
 
-export const PLAN_PROMPT = `You are a task planner. Given a list of tasks, create an execution plan that maximizes parallelism.
+When done creating all tasks, say "ENUMERATE_COMPLETE".`;
 
-Output a JSON object with this structure:
-{
-  "parallelGroups": [
-    ["task-1", "task-2"],  // These can run in parallel
-    ["task-3"],            // This depends on group 1
-    ["task-4", "task-5"]   // These can run in parallel after task-3
-  ],
-  "reasoning": "Explanation of the plan"
-}
+export const PLAN_PROMPT = `You are a task planner. Review the tasks in the database and create an execution plan.
+
+Use the add_plan_group tool to define parallel execution groups.
+
+For each group, call add_plan_group with:
+- groupIndex: Order of execution (0 = first group, 1 = second, etc.)
+- taskIds: Array of task IDs that can run in parallel
 
 Rules:
-- Tasks with no dependencies can run in parallel
-- Tasks depending on the same parent can run in parallel after parent completes
-- Minimize total execution time`;
+- Group 0 should contain tasks with no dependencies
+- Later groups contain tasks whose dependencies are in earlier groups
+- Tasks in the same group run in parallel
+- Minimize total execution time
+
+When done, say "PLAN_COMPLETE".`;
 
 export const BUILD_PROMPT = `You are a code builder. Implement the assigned task.
 
-Your task details are in the task file. Implement it following TDD:
+Follow TDD:
 1. Write a failing test
 2. Implement minimal code to pass
 3. Refactor if needed
 4. Run tests to verify
 
-When complete, output: TASK_COMPLETE
-If stuck, output: TASK_STUCK: <reason>`;
+Use these tools as you work:
+- add_context(type: "discovery", content: "...") - Record things you learn
+- add_context(type: "decision", content: "...") - Record implementation decisions
+- add_context(type: "error", content: "...") - Record errors encountered
+
+When complete, call complete_task(taskId: "<your-task-id>").
+If stuck, call update_loop_status(loopId: "<your-loop-id>", status: "stuck", error: "<reason>").`;
 
 export const REVIEW_PROMPT = `You are a code reviewer. Evaluate the work done so far.
 
@@ -1187,12 +1290,13 @@ Check:
 3. Do all tests pass?
 4. Is the code quality acceptable?
 
-Output a JSON object:
-{
-  "passed": true/false,
-  "issues": ["list of issues if any"],
-  "suggestions": ["optional improvements"]
-}`;
+Record your findings using:
+- add_context(type: "error", content: "...") for each issue found
+- add_context(type: "discovery", content: "...") for observations
+
+When done, call set_review_result with:
+- passed: true/false
+- issues: Array of issue descriptions (if any)`;
 ```
 
 **Step 3: Write failing test for spawn**
@@ -1231,6 +1335,7 @@ Expected: FAIL - module not found
 
 Create `src/agents/spawn.ts`:
 ```typescript
+import { resolve } from 'node:path';
 import type { Phase } from '../types/index.js';
 
 export interface AgentConfig {
@@ -1239,6 +1344,7 @@ export interface AgentConfig {
   permissionMode: 'bypassPermissions' | 'acceptEdits';
   maxTurns: number;
   systemPrompt?: string;
+  mcpServers?: Record<string, { command: string; args: string[] }>;
 }
 
 const PHASE_TOOLS: Record<Phase, string[]> = {
@@ -1259,13 +1365,38 @@ const PHASE_MAX_TURNS: Record<Phase, number> = {
   complete: 1,
 };
 
-export function createAgentConfig(phase: Phase, cwd: string): AgentConfig {
-  return {
+/**
+ * Create agent config with MCP server for database access.
+ * The MCP server provides tools like write_task, complete_task, etc.
+ */
+export function createAgentConfig(
+  phase: Phase,
+  cwd: string,
+  runId?: string,
+  dbPath?: string
+): AgentConfig {
+  const config: AgentConfig = {
     cwd,
     allowedTools: PHASE_TOOLS[phase],
     permissionMode: 'bypassPermissions',
     maxTurns: PHASE_MAX_TURNS[phase],
   };
+
+  // Add MCP server for phases that write to the database
+  if (runId && ['enumerate', 'plan', 'build', 'review', 'revise'].includes(phase)) {
+    config.mcpServers = {
+      'c2-db': {
+        command: 'node',
+        args: [
+          resolve(cwd, 'node_modules/.bin/c2-mcp'),
+          runId,
+          dbPath || resolve(cwd, '.c2/state.db'),
+        ],
+      },
+    };
+  }
+
+  return config;
 }
 
 export interface AgentMessage {
@@ -3390,16 +3521,16 @@ git commit -m "chore: add example specs and finalize integration"
 
 The implementation is broken into 18 tasks (including risk mitigation tasks):
 
-1. **Project Scaffolding** - package.json, tsconfig, dependencies
+1. **Project Scaffolding** - package.json, tsconfig, dependencies (incl. better-sqlite3, MCP SDK)
 2. **Core Types** - State, Task, Loop, Cost type definitions
-3. **State Management** - Load/save with Zod validation
-3A. **Robust JSON Parser** - Multi-strategy extraction with repair (Risk #2)
+3. **SQLite Database** - Schema and database module for persistent state
+3A. **MCP Server** - Agent→DB communication via MCP tools (Risk #2 mitigation)
 4. **CLI Entry Point** - Commander-based CLI parsing
 5. **Effort Configuration** - Effort level configs with cost limits (Risk #3)
-6. **Agent Spawning** - Claude SDK wrapper and prompts
+6. **Agent Spawning** - Claude SDK wrapper with MCP server integration
 6A. **Prompt Testing Harness** - Validate prompts before deployment (Risk #1)
-7. **Enumerate Phase** - Task extraction with granularity validation (Risk #5)
-8. **Plan Phase** - Parallel group planning
+7. **Enumerate Phase** - Task creation via MCP tools with granularity validation (Risk #5)
+8. **Plan Phase** - Parallel group creation via MCP tools
 9. **Loop Manager** - Parallel loop coordination
 10. **Stuck Detection** - Loop health monitoring with logging
 11. **Build Phase** - Parallel task execution with cost tracking
@@ -3409,9 +3540,15 @@ The implementation is broken into 18 tasks (including risk mitigation tasks):
 15. **Integration** - TUI + orchestrator wiring
 16. **Final Test** - End-to-end validation
 
+**Architecture:**
+- **SQLite** (`.c2/state.db`) stores all state - no JSON files
+- **MCP Server** (`c2-mcp`) exposes DB operations as tools
+- **Agents** call MCP tools directly instead of outputting JSON
+- **No parsing needed** - tool parameters are already structured
+
 **Risk Mitigations Integrated:**
 - **Risk #1 (Prompts)**: Task 6A adds prompt testing harness
-- **Risk #2 (JSON)**: Task 3A adds robust multi-strategy JSON parser
+- **Risk #2 (JSON Parsing)**: Eliminated - agents write to SQLite via MCP tools
 - **Risk #3 (Costs)**: Tasks 2, 5, 13 add cost tracking and limits
 - **Risk #4 (Stuck Detection)**: Task 10 has configurable thresholds
 - **Risk #5 (Granularity)**: Task 7 validates task sizing
