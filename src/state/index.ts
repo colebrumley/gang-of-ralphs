@@ -185,8 +185,8 @@ function saveLoops(state: OrchestratorState): void {
     INSERT OR REPLACE INTO loops (
       id, run_id, task_ids, iteration, max_iterations, review_interval,
       last_review_at, status, same_error_count, no_progress_count,
-      last_error, last_file_change_iteration, cost_usd, worktree_path, phase
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      last_error, last_file_change_iteration, last_activity_at, cost_usd, worktree_path, phase
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const loop of state.activeLoops) {
@@ -205,6 +205,7 @@ function saveLoops(state: OrchestratorState): void {
       loop.stuckIndicators.noProgressCount,
       loop.stuckIndicators.lastError,
       loop.stuckIndicators.lastFileChangeIteration,
+      loop.stuckIndicators.lastActivityAt,
       costUsd,
       loop.worktreePath,
       loop.phase
@@ -300,6 +301,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     no_progress_count: number;
     last_error: string | null;
     last_file_change_iteration: number;
+    last_activity_at: number | null;
     worktree_path: string | null;
     cost_usd: number;
     phase: string;
@@ -320,6 +322,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
         noProgressCount: row.no_progress_count,
         lastError: row.last_error,
         lastFileChangeIteration: row.last_file_change_iteration,
+        lastActivityAt: row.last_activity_at ?? Date.now(),
       },
       output: [],
       worktreePath: row.worktree_path,

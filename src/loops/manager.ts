@@ -44,6 +44,7 @@ export class LoopManager {
         noProgressCount: 0,
         lastError: null,
         lastFileChangeIteration: 0,
+        lastActivityAt: Date.now(),
       },
       output: [],
       worktreePath,
@@ -130,6 +131,17 @@ export class LoopManager {
       if (loop.output.length > 100) {
         loop.output = loop.output.slice(-100);
       }
+    }
+  }
+
+  /**
+   * Update the last activity timestamp for a loop.
+   * Called whenever output is received from the agent.
+   */
+  updateLastActivity(loopId: string): void {
+    const loop = this.loops.get(loopId);
+    if (loop) {
+      loop.stuckIndicators.lastActivityAt = Date.now();
     }
   }
 

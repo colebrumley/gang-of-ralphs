@@ -1,10 +1,26 @@
 import { Box, Text } from 'ink';
+import { useEffect, useState } from 'react';
 import type { LoopState } from '../types/index.js';
 
 interface ColumnProps {
   loop: LoopState;
   taskTitle: string;
   isFocused?: boolean;
+}
+
+function formatIdleTime(lastActivityAt: number, now: number): { text: string; color: string } {
+  const idleSec = Math.floor((now - lastActivityAt) / 1000);
+  if (idleSec < 30) {
+    return { text: `${idleSec}s`, color: 'green' };
+  }
+  if (idleSec < 120) {
+    return { text: `${idleSec}s`, color: 'yellow' };
+  }
+  const idleMin = Math.floor(idleSec / 60);
+  if (idleMin < 5) {
+    return { text: `${idleMin}m`, color: 'yellow' };
+  }
+  return { text: `${idleMin}m`, color: 'red' };
 }
 
 function getStatusIndicator(status: LoopState['status']): { symbol: string; color: string } {
@@ -30,6 +46,17 @@ export function Column({ loop, taskTitle, isFocused = false }: ColumnProps) {
   // Longer text limits when focused
   const titleLimit = isFocused ? 50 : 20;
   const outputLimit = isFocused ? 80 : 30;
+
+  // Track current time for idle display (only update for running loops)
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (loop.status !== 'running') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [loop.status]);
+
+  const idleInfo =
+    loop.status === 'running' ? formatIdleTime(loop.stuckIndicators.lastActivityAt, now) : null;
 
   return (
     <Box
@@ -63,6 +90,13 @@ export function Column({ loop, taskTitle, isFocused = false }: ColumnProps) {
         <Text color={status.color}>{status.symbol}</Text>
         <Text> </Text>
         <Text color={status.color}>{loop.status}</Text>
+        {idleInfo && (
+          <>
+            <Text> </Text>
+            <Text dimColor>idle:</Text>
+            <Text color={idleInfo.color}>{idleInfo.text}</Text>
+          </>
+        )}
       </Box>
 
       {/* Worktree path */}

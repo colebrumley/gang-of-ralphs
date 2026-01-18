@@ -9,8 +9,10 @@ import {
   formatCostExceededError,
 } from '../../costs/index.js';
 import type { DebugTracer } from '../../debug/index.js';
+import { IdleTimeoutError, createIdleMonitor } from '../../loops/idle-timeout.js';
 import type { LoopManager } from '../../loops/manager.js';
 import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
+import { MCP_SERVER_PATH } from '../../paths.js';
 import type {
   LoopState,
   OrchestratorState,
@@ -94,6 +96,7 @@ export interface BuildResult {
 export async function executeBuildIteration(
   state: OrchestratorState,
   loopManager: LoopManager,
+  onLoopCreated?: (loop: LoopState) => void,
   onLoopOutput?: (loopId: string, text: string) => void,
   tracer?: DebugTracer
 ): Promise<BuildResult> {
@@ -151,6 +154,8 @@ export async function executeBuildIteration(
       const taskId = nextGroup.shift()!;
       const loop = await loopManager.createLoop([taskId], state.tasks);
       loopManager.updateLoopStatus(loop.loopId, 'running');
+      // Notify TUI immediately so it can display the loop and receive output updates
+      onLoopCreated?.(loop);
     }
   }
 
@@ -183,30 +188,49 @@ export async function executeBuildIteration(
       prompt,
     });
 
+    // Create idle monitor to detect hung agents
+    const idleMonitor = createIdleMonitor();
+
     try {
-      for await (const message of query({
-        prompt,
-        options: {
-          cwd: loopCwd,
-          allowedTools: config.allowedTools,
-          maxTurns: 10, // Single iteration limit
-          model: config.model,
-        },
-      })) {
-        if (message.type === 'assistant' && message.message?.content) {
-          for (const block of message.message.content) {
-            if ('text' in block) {
-              output += block.text;
-              writer?.appendOutput(block.text);
-              onLoopOutput?.(loop.loopId, block.text);
-              loopManager.appendOutput(loop.loopId, block.text);
+      // Race the query loop against the idle timeout
+      await Promise.race([
+        (async () => {
+          for await (const message of query({
+            prompt,
+            options: {
+              cwd: loopCwd,
+              allowedTools: config.allowedTools,
+              maxTurns: 10, // Single iteration limit
+              model: config.model,
+              mcpServers: {
+                'sq-db': {
+                  command: 'node',
+                  args: [MCP_SERVER_PATH, state.runId, dbPath],
+                },
+              },
+            },
+          })) {
+            // Record activity on any message to reset idle timeout
+            idleMonitor.recordActivity();
+            loopManager.updateLastActivity(loop.loopId);
+
+            if (message.type === 'assistant' && message.message?.content) {
+              for (const block of message.message.content) {
+                if ('text' in block) {
+                  output += block.text;
+                  writer?.appendOutput(block.text);
+                  onLoopOutput?.(loop.loopId, block.text);
+                  loopManager.appendOutput(loop.loopId, block.text);
+                }
+              }
+            }
+            if (message.type === 'result') {
+              costUsd = (message as any).total_cost_usd || 0;
             }
           }
-        }
-        if (message.type === 'result') {
-          costUsd = (message as any).total_cost_usd || 0;
-        }
-      }
+        })(),
+        idleMonitor.promise,
+      ]);
 
       const durationMs = Date.now() - startTime;
       await writer?.complete(costUsd, durationMs);
@@ -248,8 +272,24 @@ export async function executeBuildIteration(
         hasError = true;
       }
     } catch (e) {
+      if (e instanceof IdleTimeoutError) {
+        // Agent hit idle timeout - mark as stuck
+        loopManager.updateLoopStatus(loop.loopId, 'stuck');
+        loop.stuckIndicators.lastError = e.message;
+        const durationMs = Date.now() - startTime;
+        await writer?.complete(costUsd, durationMs);
+        return {
+          loopId: loop.loopId,
+          taskId: task.id,
+          completed: false,
+          costUsd,
+          idleTimeout: true,
+        };
+      }
       hasError = true;
       errorMessage = String(e);
+    } finally {
+      idleMonitor.cancel();
     }
 
     loopManager.incrementIteration(loop.loopId);
@@ -287,11 +327,14 @@ export async function executeBuildIteration(
     .getActiveLoops()
     .some((loop) => loopManager.needsReview(loop.loopId));
 
+  // Check if any loop hit idle timeout
+  const hadIdleTimeout = results.some((r) => 'idleTimeout' in r && r.idleTimeout);
+
   return {
     completedTasks: [...state.completedTasks, ...newlyCompleted],
     activeLoops: loopManager.getAllLoops(),
     needsReview,
-    stuck: false,
+    stuck: hadIdleTimeout,
     loopCosts,
   };
 }

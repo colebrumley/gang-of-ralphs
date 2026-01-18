@@ -487,6 +487,7 @@ describe('State Persistence', () => {
           noProgressCount: 0,
           lastError: 'Test error',
           lastFileChangeIteration: 2,
+          lastActivityAt: Date.now(),
         },
         output: [],
         worktreePath: '/path/to/worktree',

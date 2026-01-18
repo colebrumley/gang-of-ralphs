@@ -68,6 +68,7 @@ function createTestLoop(overrides: Partial<LoopState> = {}): LoopState {
       noProgressCount: 0,
       lastError: null,
       lastFileChangeIteration: 0,
+      lastActivityAt: Date.now(),
     },
     output: [],
     worktreePath: null,

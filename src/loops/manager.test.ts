@@ -71,6 +71,7 @@ describe('Loop Manager', () => {
         noProgressCount: 0,
         lastError: 'some error',
         lastFileChangeIteration: 4,
+        lastActivityAt: Date.now(),
       },
       output: ['line1', 'line2'],
       worktreePath: '/path/to/worktree',

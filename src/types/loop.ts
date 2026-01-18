@@ -3,6 +3,7 @@ export interface StuckIndicators {
   noProgressCount: number;
   lastError: string | null;
   lastFileChangeIteration: number;
+  lastActivityAt: number; // Unix timestamp (ms) of last output received
 }
 
 export interface LoopState {

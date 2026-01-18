@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS loops (
   no_progress_count INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   last_file_change_iteration INTEGER NOT NULL DEFAULT 0,
+  last_activity_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000),
   cost_usd REAL NOT NULL DEFAULT 0,
   worktree_path TEXT,
   phase TEXT NOT NULL DEFAULT 'build', -- Phase that created this loop

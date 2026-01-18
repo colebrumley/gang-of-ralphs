@@ -5,6 +5,7 @@ export enum StuckReason {
   REPEATED_ERROR = 'repeated_error',
   NO_PROGRESS = 'no_progress',
   MAX_ITERATIONS = 'max_iterations',
+  IDLE_TIMEOUT = 'idle_timeout',
 }
 
 export interface StuckResult {

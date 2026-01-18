@@ -17,6 +17,7 @@ describe('Stuck Detection', () => {
       noProgressCount: 0,
       lastError: null,
       lastFileChangeIteration: 10,
+      lastActivityAt: Date.now(),
     },
     output: [],
     worktreePath: null,
