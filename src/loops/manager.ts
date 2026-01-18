@@ -70,7 +70,11 @@ export class LoopManager {
   }
 
   canSpawnMore(): boolean {
-    const activeCount = this.getActiveLoops().length + this.getPendingLoops().length;
+    // Count running, pending, and interrupted loops (interrupted will be restarted)
+    const activeCount =
+      this.getActiveLoops().length +
+      this.getPendingLoops().length +
+      this.getInterruptedLoops().length;
     return activeCount < this.config.maxLoops;
   }
 
@@ -88,6 +92,10 @@ export class LoopManager {
 
   getPendingLoops(): LoopState[] {
     return this.getAllLoops().filter((l) => l.status === 'pending');
+  }
+
+  getInterruptedLoops(): LoopState[] {
+    return this.getAllLoops().filter((l) => l.status === 'interrupted');
   }
 
   updateLoopStatus(loopId: string, status: LoopState['status']): void {

@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS loops (
   max_iterations INTEGER NOT NULL,
   review_interval INTEGER NOT NULL,
   last_review_at INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'stuck', 'completed', 'failed')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'stuck', 'completed', 'failed', 'interrupted')),
   same_error_count INTEGER NOT NULL DEFAULT 0,
   no_progress_count INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,

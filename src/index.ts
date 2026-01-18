@@ -4,11 +4,12 @@ import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createCLI } from './cli.js';
-import { createDatabase } from './db/index.js';
+import { closeDatabase, createDatabase } from './db/index.js';
 import { createTracer } from './debug/index.js';
 import { getExitCode, runOrchestrator } from './orchestrator/index.js';
 import { printDryRunSummary } from './orchestrator/summary.js';
 import { initializeState, loadState, saveRun } from './state/index.js';
+import type { OrchestratorState } from './types/index.js';
 
 async function cleanWorktrees(runId?: string) {
   const worktreeDir = join(process.cwd(), '.sq', 'worktrees');
@@ -75,12 +76,13 @@ async function main() {
     }
   }
 
-  let state;
+  let state: OrchestratorState;
 
   // Try to resume existing run if --resume flag is set
   if (opts.resume) {
-    state = loadState(stateDir);
-    if (state) {
+    const loadedState = loadState(stateDir);
+    if (loadedState) {
+      state = loadedState;
       console.log(`Resuming run: ${state.runId}`);
       console.log(`Current phase: ${state.phase}`);
     } else {
@@ -178,9 +180,51 @@ async function main() {
     return; // TUI handles everything
   }
 
+  // Set up signal handlers for graceful shutdown (non-TUI mode)
+  let shuttingDown = false;
+  const handleShutdown = () => {
+    if (shuttingDown) return; // Prevent double-handling
+    shuttingDown = true;
+
+    console.log('\nInterrupted - saving state...');
+    try {
+      // Mark any running loops as interrupted for proper resume
+      const updatedLoops = state.activeLoops.map((loop) =>
+        loop.status === 'running'
+          ? {
+              ...loop,
+              status: 'interrupted' as const,
+              stuckIndicators: {
+                ...loop.stuckIndicators,
+                lastError: 'Process interrupted by signal',
+              },
+            }
+          : loop
+      );
+      state.activeLoops = updatedLoops;
+
+      // Log the interruption to trace
+      tracer.logError('Process interrupted by signal (SIGINT/SIGTERM)', state.phase);
+
+      saveRun(state);
+      tracer.finalize().catch(() => {});
+      closeDatabase();
+    } catch {
+      // Ignore errors during shutdown - best effort save
+    }
+    process.exit(130); // Standard exit code for SIGINT
+  };
+
+  process.on('SIGINT', handleShutdown);
+  process.on('SIGTERM', handleShutdown);
+
   // Run phases until complete or error
   let iterations = 0;
   const maxIterations = 50; // Safety limit
+
+  // Line buffer for loop output - accumulate partial lines until newline
+  const loopLineBuffers = new Map<string, string>();
+
   while (state.phase !== 'complete' && iterations < maxIterations) {
     iterations++;
     const prevCompletedCount = state.completedTasks.length;
@@ -190,7 +234,17 @@ async function main() {
       onPhaseComplete: (phase, success) =>
         console.log(`Phase ${phase} ${success ? 'completed' : 'failed'}`),
       onOutput: (text) => process.stdout.write(text),
-      onLoopOutput: (loopId, text) => console.log(`[${loopId.slice(0, 8)}] ${text}`),
+      onLoopOutput: (loopId, text) => {
+        // Buffer partial lines - only print complete lines
+        const currentBuffer = loopLineBuffers.get(loopId) || '';
+        const buffered = currentBuffer + text;
+        const lines = buffered.split('\n');
+        // Last element is either empty (if text ended with \n) or a partial line
+        loopLineBuffers.set(loopId, lines.pop() || '');
+        for (const line of lines) {
+          console.log(`[${loopId.slice(0, 8)}] ${line}`);
+        }
+      },
       tracer,
     });
 
@@ -210,6 +264,10 @@ async function main() {
     }
   }
 
+  // Clean up signal handlers before normal exit
+  process.off('SIGINT', handleShutdown);
+  process.off('SIGTERM', handleShutdown);
+
   const exitCode = getExitCode(state);
 
   if (state.phase === 'complete') {
@@ -225,6 +283,7 @@ async function main() {
     await tracer.finalize();
   }
 
+  closeDatabase();
   process.exit(exitCode);
 }
 

@@ -27,22 +27,11 @@ export function buildPromptWithFeedback(
   iteration: number,
   maxIterations: number
 ): string {
-  let prompt = '';
+  // Static content first for API-level prompt caching
+  let prompt = BUILD_PROMPT;
 
-  // Filter issues for this task
-  const relevantIssues = reviewIssues.filter((i) => i.taskId === task.id);
-
-  if (relevantIssues.length > 0) {
-    prompt += '## Previous Review Feedback\n';
-    prompt += 'Your last implementation had these issues. Fix them:\n\n';
-    for (const issue of relevantIssues) {
-      const location = issue.line ? `${issue.file}:${issue.line}` : issue.file;
-      prompt += `- **${location}** (${issue.type}): ${issue.description}\n`;
-      prompt += `  Fix: ${issue.suggestion}\n\n`;
-    }
-  }
-
-  prompt += `${BUILD_PROMPT}
+  // Variable content after the static prefix
+  prompt += `
 
 ## Current Task:
 ID: ${task.id}
@@ -50,6 +39,19 @@ Title: ${task.title}
 Description: ${task.description}
 
 ## Iteration: ${iteration}/${maxIterations}`;
+
+  // Filter issues for this task
+  const relevantIssues = reviewIssues.filter((i) => i.taskId === task.id);
+
+  if (relevantIssues.length > 0) {
+    prompt += '\n\n## Previous Review Feedback\n';
+    prompt += 'Your last implementation had these issues. Fix them:\n\n';
+    for (const issue of relevantIssues) {
+      const location = issue.line ? `${issue.file}:${issue.line}` : issue.file;
+      prompt += `- **${location}** (${issue.type}): ${issue.description}\n`;
+      prompt += `  Fix: ${issue.suggestion}\n\n`;
+    }
+  }
 
   return prompt;
 }
@@ -147,6 +149,14 @@ export async function executeBuildIteration(
     }
   }
 
+  // Restart interrupted loops (from previous process termination)
+  for (const loop of loopManager.getAllLoops()) {
+    if (loop.status === 'interrupted') {
+      tracer?.logLoopStatusChange(loop.loopId, 'running', loop.taskIds);
+      loopManager.updateLoopStatus(loop.loopId, 'running');
+    }
+  }
+
   // Spawn new loops for available tasks
   const nextGroup = getNextParallelGroup(graph, state.completedTasks);
   if (nextGroup && canStartGroup(nextGroup, state.completedTasks, state.tasks)) {
@@ -200,8 +210,9 @@ export async function executeBuildIteration(
             options: {
               cwd: loopCwd,
               allowedTools: config.allowedTools,
-              maxTurns: 10, // Single iteration limit
+              maxTurns: 10_000, // Emergency backstop only; idle timeout is the real limit
               model: config.model,
+              includePartialMessages: true,
               mcpServers: {
                 'sq-db': {
                   command: 'node',
@@ -214,13 +225,49 @@ export async function executeBuildIteration(
             idleMonitor.recordActivity();
             loopManager.updateLastActivity(loop.loopId);
 
+            // Handle streaming events for real-time thinking output
+            if (message.type === 'stream_event') {
+              const event = message.event as any;
+              // Handle thinking delta events
+              if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+                const thinkingText = event.delta.thinking || '';
+                if (thinkingText) {
+                  writer?.appendOutput(thinkingText);
+                  onLoopOutput?.(loop.loopId, `[thinking] ${thinkingText}`);
+                  loopManager.appendOutput(loop.loopId, `[thinking] ${thinkingText}`);
+                }
+              }
+              // Handle text delta events
+              if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+                const textDelta = event.delta.text || '';
+                if (textDelta) {
+                  output += textDelta;
+                  writer?.appendOutput(textDelta);
+                  onLoopOutput?.(loop.loopId, textDelta);
+                  loopManager.appendOutput(loop.loopId, textDelta);
+                }
+              }
+            }
             if (message.type === 'assistant' && message.message?.content) {
               for (const block of message.message.content) {
-                if ('text' in block) {
+                // Only handle text blocks that weren't already streamed
+                if ('text' in block && !output.includes(block.text)) {
                   output += block.text;
                   writer?.appendOutput(block.text);
                   onLoopOutput?.(loop.loopId, block.text);
                   loopManager.appendOutput(loop.loopId, block.text);
+                }
+                // Capture thinking blocks to show activity during extended thinking
+                if (
+                  'type' in block &&
+                  block.type === 'thinking' &&
+                  'thinking' in block &&
+                  typeof block.thinking === 'string'
+                ) {
+                  const thinkingText = `[thinking] ${block.thinking}\n`;
+                  writer?.appendOutput(thinkingText);
+                  onLoopOutput?.(loop.loopId, thinkingText);
+                  loopManager.appendOutput(loop.loopId, thinkingText);
                 }
               }
             }
@@ -278,6 +325,7 @@ export async function executeBuildIteration(
         loop.stuckIndicators.lastError = e.message;
         const durationMs = Date.now() - startTime;
         await writer?.complete(costUsd, durationMs);
+        tracer?.logError(`Loop ${loop.loopId} idle timeout: ${e.message}`, 'build');
         return {
           loopId: loop.loopId,
           taskId: task.id,
@@ -288,6 +336,8 @@ export async function executeBuildIteration(
       }
       hasError = true;
       errorMessage = String(e);
+      // Log the error to trace for debugging
+      tracer?.logError(`Loop ${loop.loopId} error: ${errorMessage}`, 'build');
     } finally {
       idleMonitor.cancel();
     }

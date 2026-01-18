@@ -13,7 +13,7 @@ export interface LoopState {
   maxIterations: number;
   reviewInterval: number;
   lastReviewAt: number;
-  status: 'pending' | 'running' | 'stuck' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'stuck' | 'completed' | 'failed' | 'interrupted';
   stuckIndicators: StuckIndicators;
   output: string[]; // Recent output lines for TUI
   worktreePath: string | null; // Path to git worktree (null if not using worktrees)

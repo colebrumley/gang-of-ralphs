@@ -29,7 +29,7 @@ export const LoopStateSchema = z.object({
   maxIterations: z.number(),
   reviewInterval: z.number(),
   lastReviewAt: z.number(),
-  status: z.enum(['pending', 'running', 'stuck', 'completed', 'failed']),
+  status: z.enum(['pending', 'running', 'stuck', 'completed', 'failed', 'interrupted']),
   stuckIndicators: StuckIndicatorsSchema,
   output: z.array(z.string()),
   worktreePath: z.string().nullable(),

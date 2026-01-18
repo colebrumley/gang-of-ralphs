@@ -47,7 +47,7 @@ export interface DecisionEvent extends TraceEvent {
   reason: string;
 }
 
-export type LoopStatus = 'pending' | 'running' | 'stuck' | 'completed' | 'failed';
+export type LoopStatus = 'pending' | 'running' | 'stuck' | 'completed' | 'failed' | 'interrupted';
 
 export interface LoopEvent extends TraceEvent {
   type: 'loop_created' | 'loop_iteration' | 'loop_status_change';

@@ -296,7 +296,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     max_iterations: number;
     review_interval: number;
     last_review_at: number;
-    status: 'pending' | 'running' | 'stuck' | 'completed' | 'failed';
+    status: 'pending' | 'running' | 'stuck' | 'completed' | 'failed' | 'interrupted';
     same_error_count: number;
     no_progress_count: number;
     last_error: string | null;

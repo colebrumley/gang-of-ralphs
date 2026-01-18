@@ -40,6 +40,11 @@ export function App({ initialState, tracer }: AppProps) {
   const [running, setRunning] = useState(true);
   const stateRef = useRef(state);
 
+  // Explicit trigger counter - increments after each orchestrator run to reliably
+  // trigger the next iteration (fixes issue where state.phase staying 'build'
+  // didn't reliably trigger re-runs via runPhase reference changes)
+  const [runTrigger, setRunTrigger] = useState(0);
+
   // Status area state
   const [isLoading, setIsLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState(getPhaseStatusMessage(initialState.phase));
@@ -47,6 +52,10 @@ export function App({ initialState, tracer }: AppProps) {
 
   // Activity tracking for "is it stuck?" indicator
   const [lastActivityTime, setLastActivityTime] = useState<number>(Date.now());
+
+  // Line buffers for streaming output - accumulate partial lines until newline
+  const phaseLineBuffer = useRef<string>('');
+  const loopLineBuffers = useRef<Map<string, string>>(new Map());
 
   // UI state for focused column (null = no focus, 0-3 = focused column index)
   const [focusedLoopIndex, setFocusedLoopIndex] = useState<number | null>(null);
@@ -59,9 +68,30 @@ export function App({ initialState, tracer }: AppProps) {
   // Handle graceful shutdown on SIGINT (Ctrl+C)
   useEffect(() => {
     const handleShutdown = () => {
-      // Save current state before exiting
+      // Mark running loops as interrupted and save state before exiting
       try {
-        saveRun(stateRef.current);
+        const currentState = stateRef.current;
+
+        // Mark any running loops as interrupted for proper resume
+        const updatedLoops = currentState.activeLoops.map((loop) =>
+          loop.status === 'running'
+            ? {
+                ...loop,
+                status: 'interrupted' as const,
+                stuckIndicators: {
+                  ...loop.stuckIndicators,
+                  lastError: 'Process interrupted by signal',
+                },
+              }
+            : loop
+        );
+
+        const updatedState = { ...currentState, activeLoops: updatedLoops };
+
+        // Log the interruption to trace
+        tracer?.logError('Process interrupted by signal (SIGINT/SIGTERM)', currentState.phase);
+
+        saveRun(updatedState);
         tracer?.finalize().catch(() => {});
         closeDatabase();
       } catch {
@@ -113,61 +143,94 @@ export function App({ initialState, tracer }: AppProps) {
   const runPhase = useCallback(async () => {
     if (!running || state.phase === 'complete') return;
 
-    const newState = await runOrchestrator(state, {
-      onPhaseStart: (phase) => {
-        setIsLoading(true);
-        setStatusMessage(getPhaseStatusMessage(phase));
-        setPhaseOutput([]);
-      },
-      onPhaseComplete: (_phase, success) => {
-        setIsLoading(false);
-        setStatusMessage(success ? 'Complete' : 'Failed');
-      },
-      onOutput: (text) => {
-        // Stream phase output (enumerate, plan, review, etc.)
-        setLastActivityTime(Date.now());
-        setPhaseOutput((prev) => [...prev.slice(-9), text]);
-      },
-      onLoopCreated: (loop) => {
-        // Add new loop to state immediately so onLoopOutput can find it
-        setLoops((prev) => {
-          // Avoid duplicates in case loop was already restored
-          if (prev.some((l) => l.loopId === loop.loopId)) {
-            return prev;
+    try {
+      const newState = await runOrchestrator(state, {
+        onPhaseStart: (phase) => {
+          setIsLoading(true);
+          setStatusMessage(getPhaseStatusMessage(phase));
+          setPhaseOutput([]);
+          // Clear line buffers when phase changes
+          phaseLineBuffer.current = '';
+          loopLineBuffers.current.clear();
+        },
+        onPhaseComplete: (_phase, success) => {
+          setIsLoading(false);
+          setStatusMessage(success ? 'Complete' : 'Failed');
+        },
+        onOutput: (text) => {
+          // Stream phase output (enumerate, plan, review, etc.)
+          setLastActivityTime(Date.now());
+          // Buffer partial lines - only add complete lines to output
+          const buffered = phaseLineBuffer.current + text;
+          const lines = buffered.split('\n');
+          // Last element is either empty (if text ended with \n) or a partial line
+          phaseLineBuffer.current = lines.pop() || '';
+          if (lines.length > 0) {
+            setPhaseOutput((prev) => [...prev.slice(-(10 - lines.length)), ...lines]);
           }
-          return [...prev, loop];
-        });
-      },
-      onLoopOutput: (loopId, text) => {
-        setLastActivityTime(Date.now());
-        setLoops((prev) =>
-          prev.map((l) =>
-            l.loopId === loopId ? { ...l, output: [...l.output.slice(-99), text] } : l
-          )
-        );
-      },
-      tracer,
-    });
+        },
+        onLoopCreated: (loop) => {
+          // Add new loop to state immediately so onLoopOutput can find it
+          setLoops((prev) => {
+            // Avoid duplicates in case loop was already restored
+            if (prev.some((l) => l.loopId === loop.loopId)) {
+              return prev;
+            }
+            return [...prev, loop];
+          });
+        },
+        onLoopOutput: (loopId, text) => {
+          setLastActivityTime(Date.now());
+          // Buffer partial lines per loop - only add complete lines to output
+          const currentBuffer = loopLineBuffers.current.get(loopId) || '';
+          const buffered = currentBuffer + text;
+          const lines = buffered.split('\n');
+          // Last element is either empty (if text ended with \n) or a partial line
+          loopLineBuffers.current.set(loopId, lines.pop() || '');
+          if (lines.length > 0) {
+            setLoops((prev) =>
+              prev.map((l) =>
+                l.loopId === loopId
+                  ? { ...l, output: [...l.output.slice(-(100 - lines.length)), ...lines] }
+                  : l
+              )
+            );
+          }
+        },
+        tracer,
+      });
 
-    // Update status for the new phase
-    setIsLoading(true);
-    setStatusMessage(getPhaseStatusMessage(newState.phase));
-    if (newState.phase !== state.phase) {
-      setPhaseOutput([]);
+      // Update status for the new phase
+      setIsLoading(true);
+      setStatusMessage(getPhaseStatusMessage(newState.phase));
+      if (newState.phase !== state.phase) {
+        setPhaseOutput([]);
+      }
+
+      setState(newState);
+      setLoops(newState.activeLoops);
+
+      // Save state after each phase for resume support (matches non-TUI behavior)
+      saveRun(newState);
+
+      // Trigger next iteration - this ensures the effect re-runs even when
+      // state.phase stays the same (e.g., during build iterations)
+      setRunTrigger((prev) => prev + 1);
+    } catch (error) {
+      // Log error but continue - this prevents silent hangs from unhandled exceptions
+      setStatusMessage(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      setIsLoading(false);
+      // Still trigger to allow retry/continuation
+      setRunTrigger((prev) => prev + 1);
     }
-
-    setState(newState);
-    setLoops(newState.activeLoops);
-
-    // Save state after each phase for resume support (matches non-TUI behavior)
-    saveRun(newState);
   }, [state, running, tracer]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runTrigger is intentionally used instead of runPhase to reliably trigger re-runs. Depending on runPhase (a function) caused unreliable behavior where build iterations that stayed in the same phase would not trigger the next run.
   useEffect(() => {
     if (running && state.phase !== 'complete') {
       runPhase();
     }
-  }, [running, state.phase, runPhase]);
+  }, [running, state.phase, runTrigger]);
 
   return (
     <Layout
