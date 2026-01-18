@@ -15,7 +15,7 @@ function ActivityIndicator({ lastActivityTime }: ActivityIndicatorProps) {
     return () => clearInterval(timer);
   }, []);
 
-  const elapsed = Math.floor((now - lastActivityTime) / 1000);
+  const elapsed = Math.max(0, Math.floor((now - lastActivityTime) / 1000));
   const color = elapsed < 10 ? 'green' : elapsed < 30 ? 'yellow' : 'red';
   const dot = elapsed < 10 ? '●' : '○';
 
