@@ -27,7 +27,7 @@ const MAX_ESTIMATED_ITERATIONS = 25;
 /**
  * Format codebase analysis for injection into ENUMERATE_PROMPT.
  */
-function formatCodebaseAnalysis(analysis: CodebaseAnalysis | null): string {
+export function formatCodebaseAnalysis(analysis: CodebaseAnalysis | null): string {
   if (!analysis) {
     return EMPTY_PROJECT_ANALYSIS;
   }

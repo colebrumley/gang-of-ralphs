@@ -41,7 +41,10 @@ export async function isEmptyProject(dir: string, specPath: string): Promise<boo
       return true;
     });
     return significantEntries.length === 0;
-  } catch {
+  } catch (error) {
+    // Log the error for debugging - readdir failures (permissions, etc.) are fail-safe
+    // but should be visible for troubleshooting
+    console.warn(`[analyze] isEmptyProject: failed to read directory ${dir}:`, error);
     return false;
   }
 }
@@ -58,7 +61,7 @@ export interface AnalyzeResult {
 export class AnalyzeIncompleteError extends Error {
   constructor(public readonly output: string) {
     super(
-      `Analyze phase did not signal ANALYZE_COMPLETE. Agent may have crashed, timed out, or failed. Last output: "${output.slice(-200)}"`
+      `Analyze phase did not signal ANALYZE_COMPLETE. Agent may have crashed, timed out, or failed. For large codebases, the agent may have exhausted its 30-turn limit before completing analysis. Consider breaking the codebase into smaller sections or providing a summary file. Last output: "${output.slice(-200)}"`
     );
     this.name = 'AnalyzeIncompleteError';
   }

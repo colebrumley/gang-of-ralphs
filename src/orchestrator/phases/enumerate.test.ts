@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { isEmptyProject } from './analyze.js';
-import { EnumerateIncompleteError, validateTaskGranularity } from './enumerate.js';
+import {
+  EnumerateIncompleteError,
+  formatCodebaseAnalysis,
+  validateTaskGranularity,
+} from './enumerate.js';
 
 describe('Enumerate Phase', () => {
   // NOTE: Task creation now happens via MCP tools (write_task)
@@ -101,6 +105,90 @@ describe('EnumerateIncompleteError', () => {
   test('indicates ENUMERATE_COMPLETE was missing', () => {
     const error = new EnumerateIncompleteError(0, '');
     assert.ok(error.message.includes('ENUMERATE_COMPLETE'));
+  });
+});
+
+describe('Analyze → Enumerate Integration', () => {
+  describe('formatCodebaseAnalysis', () => {
+    test('returns EMPTY_PROJECT_ANALYSIS for null analysis', () => {
+      const result = formatCodebaseAnalysis(null);
+      assert.ok(result.includes('new/empty project'));
+      assert.ok(result.includes('built from scratch'));
+    });
+
+    test('returns EMPTY_PROJECT_ANALYSIS for empty/greenfield projectType', () => {
+      const emptyAnalysis = {
+        projectType: 'empty/greenfield',
+        techStack: [],
+        directoryStructure: '',
+        existingFeatures: [],
+        entryPoints: [],
+        patterns: [],
+        summary: 'Empty project',
+      };
+      const result = formatCodebaseAnalysis(emptyAnalysis);
+      assert.ok(result.includes('new/empty project'));
+      assert.ok(result.includes('built from scratch'));
+    });
+
+    test('injects codebase analysis fields into template', () => {
+      const analysis = {
+        projectType: 'typescript/node',
+        techStack: ['TypeScript', 'Node.js', 'Jest'],
+        directoryStructure: 'src/ for source, tests/ for tests',
+        existingFeatures: ['User authentication', 'Database connection'],
+        entryPoints: ['src/index.ts', 'src/cli.ts'],
+        patterns: ['Singleton pattern for DB', 'Factory pattern for services'],
+        summary: 'A Node.js backend service with user management.',
+      };
+
+      const result = formatCodebaseAnalysis(analysis);
+
+      // Verify all fields are injected
+      assert.ok(result.includes('typescript/node'), 'Should include projectType');
+      assert.ok(result.includes('TypeScript, Node.js, Jest'), 'Should include joined techStack');
+      assert.ok(
+        result.includes('src/ for source, tests/ for tests'),
+        'Should include directoryStructure'
+      );
+      assert.ok(
+        result.includes('- User authentication'),
+        'Should format existing features as list'
+      );
+      assert.ok(result.includes('- Database connection'), 'Should include all existing features');
+      assert.ok(result.includes('src/index.ts, src/cli.ts'), 'Should include joined entryPoints');
+      assert.ok(result.includes('- Singleton pattern for DB'), 'Should format patterns as list');
+      assert.ok(result.includes('- Factory pattern for services'), 'Should include all patterns');
+      assert.ok(
+        result.includes('A Node.js backend service with user management.'),
+        'Should include summary'
+      );
+      assert.ok(
+        result.includes('avoid creating tasks for functionality that already exists'),
+        'Should include instruction to avoid duplicating existing features'
+      );
+    });
+
+    test('handles empty arrays gracefully', () => {
+      const analysis = {
+        projectType: 'python/django',
+        techStack: [],
+        directoryStructure: 'app/ contains Django app',
+        existingFeatures: [],
+        entryPoints: [],
+        patterns: [],
+        summary: 'A Django project.',
+      };
+
+      const result = formatCodebaseAnalysis(analysis);
+
+      // Should show "None" or similar for empty arrays
+      assert.ok(result.includes('python/django'), 'Should include projectType');
+      assert.ok(
+        result.includes('None detected') || result.includes('None'),
+        'Should handle empty techStack'
+      );
+    });
   });
 });
 
