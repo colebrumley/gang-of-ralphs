@@ -128,17 +128,7 @@ write_task({
 - **Dependencies**: List task IDs that must complete first (e.g., ["task-1", "task-2"])
 - **Descriptions**: Be specific about files, functions, and behavior expected
 - **Order**: Create tasks in logical dependency order
-
-### Scaffolding Tasks (for greenfield projects)
-If building from scratch, create a **scaffolding task first** with "[SCAFFOLD]" prefix:
-- Project initialization, directory structure, build config
-- Entry point files, base architecture setup
-- Core dependencies installation
-
-Example: \`write_task({ id: "task-0", title: "[SCAFFOLD] Initialize React project", ... })\`
-
-All other tasks should depend on the scaffolding task.
-
+{{SCAFFOLD_SECTION}}
 ## What Makes a Good Task
 - Clear scope: One focused piece of functionality
 - Testable: Can be verified when complete
@@ -169,40 +159,21 @@ add_plan_group({ groupIndex: 2, taskIds: ["task-4", "task-5", "task-6"] })
 \`\`\`
 
 ## Planning Rules
-
-### CRITICAL: Scaffolding Tasks Must Run First
-For greenfield projects or tasks that create initial structure, **scaffolding/foundation tasks MUST be in Group 0 ALONE**. Other tasks cannot start until scaffolding is complete.
-
-**Scaffolding tasks include:**
-- Project initialization (npm init, cargo new, etc.)
-- Creating directory structure
-- Setting up build configuration (package.json, tsconfig, etc.)
-- Installing core dependencies
-- Creating entry point files (main.ts, App.tsx, etc.)
-- Setting up frameworks or base architecture
-
-**Example for a new React app:**
-\`\`\`
-add_plan_group({ groupIndex: 0, taskIds: ["task-setup-project"] })  // Scaffolding ALONE
-add_plan_group({ groupIndex: 1, taskIds: ["task-header", "task-footer"] })  // Features can parallelize
-add_plan_group({ groupIndex: 2, taskIds: ["task-home-page"] })
-\`\`\`
-
+{{SCAFFOLD_PLAN_SECTION}}
 ### Standard Dependency Rules
-- **Group 0**: Scaffolding/foundation tasks only (if any exist)
-- **Group 1+**: Feature tasks with no other dependencies (after scaffolding)
-- **Later groups**: Tasks whose dependencies are all in earlier groups
+- **Group 0**: Tasks with no dependencies
+- **Group 1+**: Tasks whose dependencies are all in earlier groups
+- **Later groups**: Tasks with dependencies in previous groups
 - **Parallelism**: Tasks in the same group run simultaneously in separate worktrees
 - **Order**: Groups execute sequentially; tasks within a group run in parallel
 
 ## Process
 1. Review the tasks provided below
-2. **First**: Identify scaffolding/foundation tasks → put in Group 0 alone
-3. **Then**: Identify feature tasks with no dependencies → Group 1
-4. For remaining tasks, find the latest group containing their dependencies
-5. Place each task in the next group after its dependencies
-6. Use \`add_plan_group\` for each group
-7. When done, output: PLAN_COMPLETE`;
+2. Identify tasks with no dependencies → Group 0
+3. For remaining tasks, find the latest group containing their dependencies
+4. Place each task in the next group after its dependencies
+5. Use \`add_plan_group\` for each group
+6. When done, output: PLAN_COMPLETE`;
 
 export const REVIEW_PROMPT = `# REVIEW PHASE
 
@@ -349,3 +320,38 @@ Output a JSON object with your analysis and fix plan:
 \`\`\`
 
 When done analyzing, output: REVISE_COMPLETE`;
+
+// Scaffolding sections - only included for greenfield/empty projects
+export const SCAFFOLD_SECTION_ENUMERATE = `
+### Scaffolding Tasks (for greenfield projects)
+If building from scratch, create a **scaffolding task first** with "[SCAFFOLD]" prefix:
+- Project initialization, directory structure, build config
+- Entry point files, base architecture setup
+- Core dependencies installation
+
+Example: \`write_task({ id: "task-0", title: "[SCAFFOLD] Initialize React project", ... })\`
+
+All other tasks should depend on the scaffolding task.
+
+`;
+
+export const SCAFFOLD_SECTION_PLAN = `
+### CRITICAL: Scaffolding Tasks Must Run First
+For greenfield projects or tasks that create initial structure, **scaffolding/foundation tasks MUST be in Group 0 ALONE**. Other tasks cannot start until scaffolding is complete.
+
+**Scaffolding tasks include:**
+- Project initialization (npm init, cargo new, etc.)
+- Creating directory structure
+- Setting up build configuration (package.json, tsconfig, etc.)
+- Installing core dependencies
+- Creating entry point files (main.ts, App.tsx, etc.)
+- Setting up frameworks or base architecture
+
+**Example for a new React app:**
+\`\`\`
+add_plan_group({ groupIndex: 0, taskIds: ["task-setup-project"] })  // Scaffolding ALONE
+add_plan_group({ groupIndex: 1, taskIds: ["task-header", "task-footer"] })  // Features can parallelize
+add_plan_group({ groupIndex: 2, taskIds: ["task-home-page"] })
+\`\`\`
+
+`;

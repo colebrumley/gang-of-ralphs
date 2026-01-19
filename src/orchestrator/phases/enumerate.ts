@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { ENUMERATE_PROMPT } from '../../agents/prompts.js';
+import { ENUMERATE_PROMPT, SCAFFOLD_SECTION_ENUMERATE } from '../../agents/prompts.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig, getModelId } from '../../config/effort.js';
 import { getDatabase } from '../../db/index.js';
@@ -12,6 +12,39 @@ import type { OrchestratorState, Task } from '../../types/index.js';
 // Task granularity bounds (Risk #5 mitigation)
 const MIN_ESTIMATED_ITERATIONS = 3;
 const MAX_ESTIMATED_ITERATIONS = 25;
+
+// Files/directories to ignore when checking if a project is empty
+const IGNORED_ENTRIES = new Set([
+  '.git',
+  '.sq',
+  '.gitignore',
+  '.gitkeep',
+  'node_modules',
+  '.DS_Store',
+]);
+
+/**
+ * Check if a directory is effectively empty (new project).
+ * Returns true if directory contains only ignored files/dirs or spec files.
+ */
+export async function isEmptyProject(dir: string, specPath: string): Promise<boolean> {
+  try {
+    const entries = await readdir(dir);
+    const significantEntries = entries.filter((entry) => {
+      // Ignore common non-project files
+      if (IGNORED_ENTRIES.has(entry)) return false;
+      // Ignore the spec file itself
+      if (specPath.endsWith(entry)) return false;
+      // Ignore markdown files (often just specs/docs)
+      if (entry.endsWith('.md')) return false;
+      return true;
+    });
+    return significantEntries.length === 0;
+  } catch {
+    // If we can't read the directory, assume it's not empty
+    return false;
+  }
+}
 
 export interface GranularityValidation {
   valid: boolean;
@@ -94,7 +127,12 @@ export async function executeEnumerate(
   const config = createAgentConfig('enumerate', process.cwd(), state.runId, dbPath, model);
   const cwd = process.cwd();
 
-  const prompt = `${ENUMERATE_PROMPT}
+  // Only include scaffolding instructions for empty/new projects
+  const isEmpty = await isEmptyProject(cwd, state.specPath);
+  const scaffoldSection = isEmpty ? SCAFFOLD_SECTION_ENUMERATE : '';
+  const basePrompt = ENUMERATE_PROMPT.replace('{{SCAFFOLD_SECTION}}', scaffoldSection);
+
+  const prompt = `${basePrompt}
 
 ## Spec File Content:
 ${specContent}`;

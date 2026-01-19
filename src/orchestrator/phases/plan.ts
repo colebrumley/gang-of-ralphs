@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import { PLAN_PROMPT } from '../../agents/prompts.js';
+import { PLAN_PROMPT, SCAFFOLD_SECTION_PLAN } from '../../agents/prompts.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig, getModelId } from '../../config/effort.js';
 import { getDatabase } from '../../db/index.js';
 import type { DebugTracer } from '../../debug/index.js';
 import { MCP_SERVER_PATH } from '../../paths.js';
 import type { OrchestratorState, Task, TaskGraph } from '../../types/index.js';
+import { isEmptyProject } from './enumerate.js';
 
 /**
  * Load plan groups from database after agent has written them via MCP tools.
@@ -43,8 +44,13 @@ export async function executePlan(
   const model = getModelId(effortConfig.models.plan);
   const config = createAgentConfig('plan', cwd, state.runId, dbPath, model);
 
+  // Only include scaffolding instructions for empty/new projects
+  const isEmpty = await isEmptyProject(cwd, state.specPath);
+  const scaffoldSection = isEmpty ? SCAFFOLD_SECTION_PLAN : '';
+  const basePrompt = PLAN_PROMPT.replace('{{SCAFFOLD_PLAN_SECTION}}', scaffoldSection);
+
   const tasksJson = JSON.stringify(state.tasks, null, 2);
-  const prompt = `${PLAN_PROMPT}
+  const prompt = `${basePrompt}
 
 ## Tasks to Plan:
 ${tasksJson}`;
