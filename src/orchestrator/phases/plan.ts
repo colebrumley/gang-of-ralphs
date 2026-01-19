@@ -39,6 +39,21 @@ export interface PlanResult {
   costUsd: number;
 }
 
+/**
+ * Error thrown when the plan phase agent fails to signal completion.
+ */
+export class PlanIncompleteError extends Error {
+  constructor(
+    public readonly groupCount: number,
+    public readonly output: string
+  ) {
+    super(
+      `Plan phase did not signal PLAN_COMPLETE. Agent may have crashed, timed out, or failed. Found ${groupCount} partial plan groups. Last output: "${output.slice(-200)}"`
+    );
+    this.name = 'PlanIncompleteError';
+  }
+}
+
 export async function executePlan(
   state: OrchestratorState,
   onOutput?: (text: string) => void,
@@ -153,6 +168,13 @@ ${tasksJson}`;
 
   // Plan groups are now in the database via MCP add_plan_group calls
   const parallelGroups = loadPlanGroupsFromDB(state.runId);
+
+  // Validate that the agent signaled completion (Risk #4 mitigation)
+  // If the agent crashed, timed out, or failed without signaling,
+  // we should not proceed with partial data
+  if (!fullOutput.includes('PLAN_COMPLETE')) {
+    throw new PlanIncompleteError(parallelGroups.length, fullOutput);
+  }
 
   return {
     taskGraph: buildTaskGraph(state.tasks, parallelGroups),

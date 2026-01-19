@@ -3,7 +3,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
-import { isEmptyProject, validateTaskGranularity } from './enumerate.js';
+import { EnumerateIncompleteError, isEmptyProject, validateTaskGranularity } from './enumerate.js';
 
 describe('Enumerate Phase', () => {
   // NOTE: Task creation now happens via MCP tools (write_task)
@@ -74,6 +74,32 @@ describe('Enumerate Phase', () => {
     const result = validateTaskGranularity(tasks);
     assert.strictEqual(result.warnings.length, 0);
     assert.strictEqual(result.valid, true);
+  });
+});
+
+describe('EnumerateIncompleteError', () => {
+  test('includes task count in error message', () => {
+    const error = new EnumerateIncompleteError(3, 'some output');
+    assert.ok(error.message.includes('3 partial tasks'));
+    assert.strictEqual(error.taskCount, 3);
+  });
+
+  test('includes truncated output in error message', () => {
+    const longOutput = 'x'.repeat(500);
+    const error = new EnumerateIncompleteError(0, longOutput);
+    // Should include last 200 characters
+    assert.ok(error.message.includes('x'.repeat(200)));
+    assert.strictEqual(error.output, longOutput);
+  });
+
+  test('has correct error name', () => {
+    const error = new EnumerateIncompleteError(0, '');
+    assert.strictEqual(error.name, 'EnumerateIncompleteError');
+  });
+
+  test('indicates ENUMERATE_COMPLETE was missing', () => {
+    const error = new EnumerateIncompleteError(0, '');
+    assert.ok(error.message.includes('ENUMERATE_COMPLETE'));
   });
 });
 

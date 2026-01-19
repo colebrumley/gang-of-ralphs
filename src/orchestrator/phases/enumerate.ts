@@ -121,6 +121,21 @@ export interface EnumerateResult {
   costUsd: number;
 }
 
+/**
+ * Error thrown when the enumerate phase agent fails to signal completion.
+ */
+export class EnumerateIncompleteError extends Error {
+  constructor(
+    public readonly taskCount: number,
+    public readonly output: string
+  ) {
+    super(
+      `Enumerate phase did not signal ENUMERATE_COMPLETE. Agent may have crashed, timed out, or failed. Found ${taskCount} partial tasks. Last output: "${output.slice(-200)}"`
+    );
+    this.name = 'EnumerateIncompleteError';
+  }
+}
+
 export async function executeEnumerate(
   state: OrchestratorState,
   onOutput?: (text: string) => void,
@@ -235,6 +250,13 @@ ${specContent}`;
 
   // Tasks are now in the database via MCP write_task calls
   const tasks = loadTasksFromDB(state.runId);
+
+  // Validate that the agent signaled completion (Risk #4 mitigation)
+  // If the agent crashed, timed out, or failed without signaling,
+  // we should not proceed with partial data
+  if (!fullOutput.includes('ENUMERATE_COMPLETE')) {
+    throw new EnumerateIncompleteError(tasks.length, fullOutput);
+  }
 
   return {
     tasks,
