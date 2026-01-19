@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS runs (
   use_worktrees INTEGER NOT NULL DEFAULT 1,
   interpreted_intent TEXT,
   intent_satisfied INTEGER,
-  was_empty_project INTEGER  -- NULL means not yet checked, 0 = false, 1 = true
+  was_empty_project INTEGER,  -- NULL means not yet checked, 0 = false, 1 = true
+  codebase_analysis TEXT  -- JSON serialized CodebaseAnalysis
 );
 
 -- Tasks table: enumerated tasks for a run
@@ -113,7 +114,7 @@ CREATE TABLE IF NOT EXISTS loop_reviews (
 -- Phase costs: accumulated costs per phase per run
 CREATE TABLE IF NOT EXISTS phase_costs (
   run_id TEXT NOT NULL REFERENCES runs(id),
-  phase TEXT NOT NULL CHECK (phase IN ('enumerate', 'plan', 'build', 'review', 'revise', 'conflict', 'complete')),
+  phase TEXT NOT NULL CHECK (phase IN ('analyze', 'enumerate', 'plan', 'build', 'review', 'revise', 'conflict', 'complete')),
   cost_usd REAL NOT NULL DEFAULT 0,
   PRIMARY KEY (run_id, phase)
 );
