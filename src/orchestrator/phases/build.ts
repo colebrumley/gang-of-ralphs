@@ -20,6 +20,12 @@ import type {
   Task,
   TaskGraph,
 } from '../../types/index.js';
+import {
+  type StreamEvent,
+  isResultMessage,
+  isStreamEventMessage,
+  isToolProgressMessage,
+} from '../../types/index.js';
 import { executeLoopReview } from './review.js';
 
 export function buildPromptWithFeedback(
@@ -234,17 +240,17 @@ export async function executeBuildIteration(
             loopManager.updateLastActivity(loop.loopId);
 
             // Handle tool progress messages to show activity during tool execution
-            if (message.type === 'tool_progress') {
-              const toolName = (message as any).tool_name || 'tool';
-              const elapsed = (message as any).elapsed_time_seconds || 0;
+            if (isToolProgressMessage(message)) {
+              const toolName = message.tool_name || 'tool';
+              const elapsed = message.elapsed_time_seconds || 0;
               const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)`;
               writer?.appendOutput(`${progressText}\n`);
               onLoopOutput?.(loop.loopId, `${progressText}\n`);
               loopManager.appendOutput(loop.loopId, progressText);
             }
             // Handle streaming events for real-time thinking output
-            if (message.type === 'stream_event') {
-              const event = message.event as any;
+            if (isStreamEventMessage(message)) {
+              const event = message.event as StreamEvent;
               // Handle tool_use content block start to show when a tool begins
               if (
                 event.type === 'content_block_start' &&
@@ -315,8 +321,8 @@ export async function executeBuildIteration(
                 }
               }
             }
-            if (message.type === 'result') {
-              costUsd = (message as any).total_cost_usd || 0;
+            if (isResultMessage(message)) {
+              costUsd = message.total_cost_usd || 0;
             }
           }
           // Flush any remaining buffered content
