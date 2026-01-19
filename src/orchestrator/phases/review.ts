@@ -686,12 +686,14 @@ export function loadLoopReviewResultFromDB(
 
 /**
  * Generate the review prompt for a specific loop.
+ * @param isCheckpoint - If true, this is an interim checkpoint review, not a task completion review
  */
 export function getLoopReviewPrompt(
   loop: LoopState,
   task: Task,
   otherLoopsSummary: string,
-  depth: EffortConfig['reviewDepth']
+  depth: EffortConfig['reviewDepth'],
+  isCheckpoint = false
 ): string {
   const intentAnalysis = `
 ## Intent Analysis (Do This First)
@@ -792,13 +794,33 @@ ${qualityChecks}`;
       break;
   }
 
-  return `# LOOP REVIEW PHASE
+  const reviewType = isCheckpoint ? 'CHECKPOINT REVIEW' : 'LOOP REVIEW';
+  const reviewDescription = isCheckpoint
+    ? `This is an interim checkpoint review at iteration ${loop.iteration}. The task is NOT yet complete - check progress and catch issues early.`
+    : `You are reviewing work completed by Loop ${loop.loopId}.`;
 
-You are reviewing work completed by Loop ${loop.loopId}.
+  const checkpointNote = isCheckpoint
+    ? `
+## Checkpoint Review Note
+This is a progress check, not a completion review. Focus on:
+- Are we on the right track?
+- Are there any issues or bugs introduced so far?
+- Is the approach sound?
+
+The agent will continue working after this review. Don't fail the review just because the task isn't finished yet.`
+    : '';
+
+  return `# ${reviewType} PHASE
+
+${reviewDescription}
 
 ## Task Under Review
 **${task.title}**
 ${task.description}
+
+## Current Progress
+Iteration: ${loop.iteration}/${loop.maxIterations}
+${checkpointNote}
 
 ## Other Loops (for context)
 ${otherLoopsSummary || 'No other active loops'}
@@ -815,7 +837,8 @@ When done, output: REVIEW_COMPLETE`;
 }
 
 /**
- * Execute a review for a specific loop after task completion.
+ * Execute a review for a specific loop.
+ * @param isCheckpoint - If true, this is an interim checkpoint review, not a task completion review
  */
 export async function executeLoopReview(
   state: OrchestratorState,
@@ -823,7 +846,8 @@ export async function executeLoopReview(
   task: Task,
   otherLoopsSummary: string,
   onOutput?: (text: string) => void,
-  tracer?: DebugTracer
+  tracer?: DebugTracer,
+  isCheckpoint = false
 ): Promise<LoopReviewResult> {
   const dbPath = join(state.stateDir, 'state.db');
   const effortConfig = getEffortConfig(state.effort);
@@ -833,7 +857,7 @@ export async function executeLoopReview(
   const cwd = loop.worktreePath || process.cwd();
   const config = createAgentConfig('review', cwd, state.runId, dbPath, model);
 
-  const prompt = `${getLoopReviewPrompt(loop, task, otherLoopsSummary, effortConfig.reviewDepth)}
+  const prompt = `${getLoopReviewPrompt(loop, task, otherLoopsSummary, effortConfig.reviewDepth, isCheckpoint)}
 
 ## Spec:
 File: ${state.specPath}`;

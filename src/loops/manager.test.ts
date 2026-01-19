@@ -100,6 +100,98 @@ describe('Loop Manager', () => {
   });
 });
 
+describe('Checkpoint Review Methods', () => {
+  test('needsCheckpointReview returns false when interval is null', async () => {
+    const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
+    const loop = await manager.createLoop(['t1'], []);
+    manager.updateLoopStatus(loop.loopId, 'running');
+    for (let i = 0; i < 10; i++) {
+      manager.incrementIteration(loop.loopId);
+    }
+
+    // With null interval, should never need checkpoint review
+    assert.strictEqual(manager.needsCheckpointReview(null), false);
+  });
+
+  test('needsCheckpointReview returns true when iterations exceed interval', async () => {
+    const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
+    const loop = await manager.createLoop(['t1'], []);
+    manager.updateLoopStatus(loop.loopId, 'running');
+
+    // At iteration 0, lastCheckpointReviewAt = 0, interval = 3: 0 - 0 = 0, not >= 3
+    assert.strictEqual(manager.needsCheckpointReview(3), false);
+
+    manager.incrementIteration(loop.loopId); // iteration 1
+    manager.incrementIteration(loop.loopId); // iteration 2
+    assert.strictEqual(manager.needsCheckpointReview(3), false);
+
+    manager.incrementIteration(loop.loopId); // iteration 3
+    // Now: 3 - 0 >= 3, should need review
+    assert.strictEqual(manager.needsCheckpointReview(3), true);
+  });
+
+  test('markCheckpointReviewed resets the checkpoint counter', async () => {
+    const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
+    const loop = await manager.createLoop(['t1'], []);
+    manager.updateLoopStatus(loop.loopId, 'running');
+
+    // Reach iteration 3
+    for (let i = 0; i < 3; i++) {
+      manager.incrementIteration(loop.loopId);
+    }
+    assert.strictEqual(manager.needsCheckpointReview(3), true);
+
+    // Mark as checkpoint reviewed
+    manager.markCheckpointReviewed(loop.loopId);
+
+    // Should no longer need review
+    assert.strictEqual(manager.needsCheckpointReview(3), false);
+
+    // Reach 3 more iterations
+    for (let i = 0; i < 3; i++) {
+      manager.incrementIteration(loop.loopId);
+    }
+    // Now at iteration 6, lastCheckpointReviewAt = 3: 6 - 3 >= 3
+    assert.strictEqual(manager.needsCheckpointReview(3), true);
+  });
+
+  test('getLoopsNeedingCheckpointReview returns correct loops', async () => {
+    const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
+
+    const loop1 = await manager.createLoop(['t1'], []);
+    const loop2 = await manager.createLoop(['t2'], []);
+    manager.updateLoopStatus(loop1.loopId, 'running');
+    manager.updateLoopStatus(loop2.loopId, 'running');
+
+    // Advance loop1 to iteration 5
+    for (let i = 0; i < 5; i++) {
+      manager.incrementIteration(loop1.loopId);
+    }
+    // Advance loop2 to iteration 2
+    for (let i = 0; i < 2; i++) {
+      manager.incrementIteration(loop2.loopId);
+    }
+
+    const needingReview = manager.getLoopsNeedingCheckpointReview(3);
+
+    // Only loop1 should need checkpoint review (5 >= 3, but 2 < 3)
+    assert.strictEqual(needingReview.length, 1);
+    assert.strictEqual(needingReview[0].loopId, loop1.loopId);
+  });
+
+  test('getLoopsNeedingCheckpointReview returns empty for null interval', async () => {
+    const manager = new LoopManager({ maxLoops: 4, maxIterations: 20, reviewInterval: 5 });
+    const loop = await manager.createLoop(['t1'], []);
+    manager.updateLoopStatus(loop.loopId, 'running');
+    for (let i = 0; i < 10; i++) {
+      manager.incrementIteration(loop.loopId);
+    }
+
+    const needingReview = manager.getLoopsNeedingCheckpointReview(null);
+    assert.strictEqual(needingReview.length, 0);
+  });
+});
+
 describe('LoopManager with worktrees', () => {
   let testDir: string;
   let repoDir: string;

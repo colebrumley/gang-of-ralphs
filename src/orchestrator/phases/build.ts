@@ -472,6 +472,70 @@ export async function executeBuildIteration(
     loopManager.incrementIteration(loop.loopId);
     updateStuckIndicators(loop, errorMessage, !hasError);
 
+    // Check if this loop needs a checkpoint review (interim review during long-running tasks)
+    const checkpointInterval = effortConfig.checkpointReviewInterval;
+    if (
+      checkpointInterval !== null &&
+      loop.iteration - loop.lastCheckpointReviewAt >= checkpointInterval
+    ) {
+      // Emit checkpoint review header
+      onLoopOutput?.(loop.loopId, '[checkpoint-review] Running checkpoint review...\n');
+      loopManager.appendOutput(loop.loopId, '[checkpoint-review] Running checkpoint review...');
+
+      const otherLoopsSummary = loopManager.getOtherLoopsSummary(loop.loopId, state.tasks);
+      const checkpointReviewResult = await executeLoopReview(
+        state,
+        loop,
+        task,
+        otherLoopsSummary,
+        onLoopOutput
+          ? (text) => onLoopOutput(loop.loopId, `[checkpoint-review] ${text}`)
+          : undefined,
+        tracer,
+        true // isCheckpoint flag
+      );
+
+      // Add checkpoint review cost to loop cost
+      costUsd += checkpointReviewResult.costUsd;
+
+      // Mark checkpoint reviewed regardless of pass/fail
+      loopManager.markCheckpointReviewed(loop.loopId);
+
+      if (!checkpointReviewResult.passed) {
+        // Checkpoint review found issues - inject feedback for next iteration
+        // Clear existing issues for this task first to prevent stale feedback accumulation
+        state.context.reviewIssues = (state.context.reviewIssues || []).filter(
+          (i) => i.taskId !== task.id
+        );
+        // Add the new issues from this checkpoint review
+        for (const issue of checkpointReviewResult.issues) {
+          state.context.reviewIssues.push(issue);
+        }
+
+        tracer?.logError(
+          `Loop ${loop.loopId} checkpoint review found ${checkpointReviewResult.issues.length} issues at iteration ${loop.iteration}`,
+          'build'
+        );
+
+        return {
+          loopId: loop.loopId,
+          taskId: task.id,
+          completed: false,
+          costUsd,
+          checkpointReviewFailed: true,
+          reviewIssues: checkpointReviewResult.issues,
+        };
+      }
+
+      // Checkpoint review passed - continue normally
+      tracer?.logDecision(
+        'checkpoint_review',
+        { loopId: loop.loopId, iteration: loop.iteration },
+        'passed',
+        'Checkpoint review passed, continuing work'
+      );
+    }
+
     return { loopId: loop.loopId, taskId: task.id, completed: false, costUsd };
   });
 
