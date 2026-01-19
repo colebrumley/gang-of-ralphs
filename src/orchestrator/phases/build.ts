@@ -88,11 +88,11 @@ export interface BuildResult {
   activeLoops: LoopState[];
   needsReview: boolean;
   stuck: boolean;
-  pendingConflict?: {
+  pendingConflicts: Array<{
     loopId: string;
     taskId: string;
     conflictFiles: string[];
-  };
+  }>;
   loopCosts: Record<string, number>; // loopId -> cost for this iteration
 }
 
@@ -121,6 +121,7 @@ export async function executeBuildIteration(
       activeLoops: loopManager.getAllLoops(),
       needsReview: false,
       stuck: true,
+      pendingConflicts: [],
       loopCosts: {},
     };
   }
@@ -145,6 +146,7 @@ export async function executeBuildIteration(
         activeLoops: loopManager.getAllLoops(),
         needsReview: true,
         stuck: true,
+        pendingConflicts: [],
         loopCosts: {},
       };
     }
@@ -483,15 +485,25 @@ export async function executeBuildIteration(
     }
   }
 
-  // Check for conflicts - return first one found for orchestrator to handle
-  const conflictResult = results.find((r) => 'conflict' in r && r.conflict);
-  if (conflictResult && 'conflict' in conflictResult && conflictResult.conflict) {
+  // Collect ALL conflicts from parallel loops (not just the first one)
+  const pendingConflicts = results
+    .filter(
+      (
+        r
+      ): r is typeof r & {
+        conflict: NonNullable<typeof r extends { conflict?: infer C } ? C : never>;
+      } => 'conflict' in r && r.conflict !== undefined
+    )
+    .map((r) => r.conflict);
+
+  // If there are conflicts, prioritize resolving them before review/stuck checks
+  if (pendingConflicts.length > 0) {
     return {
       completedTasks: [...state.completedTasks, ...newlyCompleted],
       activeLoops: loopManager.getAllLoops(),
       needsReview: false,
       stuck: false,
-      pendingConflict: conflictResult.conflict,
+      pendingConflicts,
       loopCosts,
     };
   }
@@ -515,6 +527,7 @@ export async function executeBuildIteration(
     activeLoops: loopManager.getAllLoops(),
     needsReview,
     stuck: isStuck,
+    pendingConflicts: [],
     loopCosts,
   };
 }

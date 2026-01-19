@@ -91,10 +91,10 @@ export interface OrchestratorState {
   // Debug tracing
   debug: boolean;
 
-  // Conflict resolution
-  pendingConflict: {
+  // Conflict resolution - array to handle multiple parallel loop conflicts
+  pendingConflicts: Array<{
     loopId: string;
     taskId: string;
     conflictFiles: string[];
-  } | null;
+  }>;
 }

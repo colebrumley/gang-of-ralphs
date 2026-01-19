@@ -70,7 +70,7 @@ describe('Dry Run Summary', () => {
       baseBranch: 'main',
       useWorktrees: true,
       debug: false,
-      pendingConflict: null,
+      pendingConflicts: [],
     };
 
     // Should not throw
@@ -121,7 +121,7 @@ describe('Dry Run Summary', () => {
       baseBranch: 'main',
       useWorktrees: true,
       debug: false,
-      pendingConflict: null,
+      pendingConflicts: [],
     };
 
     // Should not throw

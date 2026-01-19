@@ -48,7 +48,7 @@ function createTestState(overrides: Partial<OrchestratorState> = {}): Orchestrat
     baseBranch: 'main',
     useWorktrees: false,
     debug: false,
-    pendingConflict: null,
+    pendingConflicts: [],
     ...overrides,
   };
 }

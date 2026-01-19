@@ -91,7 +91,7 @@ export function initializeState(options: InitStateOptions): OrchestratorState {
     baseBranch,
     useWorktrees,
     debug: options.debug ?? false,
-    pendingConflict: null,
+    pendingConflicts: [],
   };
 }
 
@@ -523,7 +523,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     baseBranch: run.base_branch,
     useWorktrees: run.use_worktrees === 1,
     debug: false, // Runtime option, not persisted
-    pendingConflict: null,
+    pendingConflicts: [],
   };
 }
 

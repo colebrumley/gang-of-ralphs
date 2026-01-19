@@ -190,9 +190,9 @@ export async function runOrchestrator(
           updateCosts(state.costs, 'build', costUsd, loopId);
         }
 
-        if (result.pendingConflict) {
-          // Merge conflict detected - transition to conflict phase
-          state.pendingConflict = result.pendingConflict;
+        if (result.pendingConflicts.length > 0) {
+          // Merge conflicts detected - add to pending and transition to conflict phase
+          state.pendingConflicts.push(...result.pendingConflicts);
           state.phase = 'conflict';
         } else if (result.stuck) {
           callbacks.tracer?.logDecision(
@@ -326,11 +326,13 @@ export async function runOrchestrator(
       }
 
       case 'conflict': {
-        if (!state.pendingConflict) {
-          throw new Error('Conflict phase entered without pendingConflict state');
+        if (state.pendingConflicts.length === 0) {
+          throw new Error('Conflict phase entered without pending conflicts');
         }
 
-        const { loopId, taskId, conflictFiles } = state.pendingConflict;
+        // Process conflicts one at a time (first in the queue)
+        const conflict = state.pendingConflicts[0];
+        const { loopId, taskId, conflictFiles } = conflict;
         const task = state.tasks.find((t) => t.id === taskId);
 
         if (!task) {
@@ -354,22 +356,30 @@ export async function runOrchestrator(
           success: result.resolved,
           timestamp: new Date().toISOString(),
           summary: result.resolved
-            ? `Resolved merge conflict in ${conflictFiles.length} file(s)`
-            : `Failed to resolve conflict: ${result.error}`,
+            ? `Resolved merge conflict in ${conflictFiles.length} file(s) for loop ${loopId}`
+            : `Failed to resolve conflict for loop ${loopId}: ${result.error}`,
           costUsd: result.costUsd,
         });
 
-        if (result.resolved) {
-          state.pendingConflict = null;
-          state.phase = 'build';
-        } else {
+        // Remove the processed conflict from the queue
+        state.pendingConflicts.shift();
+
+        if (!result.resolved) {
           // Mark the loop as failed
           const loop = state.activeLoops.find((l) => l.loopId === loopId);
           if (loop) {
             loop.status = 'failed';
           }
-          state.context.errors.push(`Conflict resolution failed: ${result.error}`);
-          state.pendingConflict = null;
+          state.context.errors.push(
+            `Conflict resolution failed for loop ${loopId}: ${result.error}`
+          );
+        }
+
+        // If more conflicts remain, stay in conflict phase; otherwise return to build
+        if (state.pendingConflicts.length > 0) {
+          // Stay in conflict phase to process remaining conflicts
+          state.phase = 'conflict';
+        } else {
           state.phase = 'build';
         }
         break;
