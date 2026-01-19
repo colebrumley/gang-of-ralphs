@@ -6,6 +6,7 @@ import { getEffortConfig } from '../config/effort.js';
 import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
 import type {
   EffortLevel,
+  LoopReviewStatus,
   LoopState,
   OrchestratorState,
   Phase,
@@ -332,32 +333,75 @@ export function loadState(stateDir: string): OrchestratorState | null {
     phase: string;
   }>;
 
+  // Load loop reviews to restore per-loop review state
+  const loopReviewRows = db
+    .prepare(`
+    SELECT id, loop_id, passed FROM loop_reviews
+    WHERE run_id = ? ORDER BY reviewed_at DESC
+  `)
+    .all(run.id) as Array<{
+    id: string;
+    loop_id: string;
+    passed: number;
+  }>;
+
+  // Group reviews by loop_id (already sorted by reviewed_at DESC)
+  const reviewsByLoop = new Map<string, typeof loopReviewRows>();
+  for (const review of loopReviewRows) {
+    const existing = reviewsByLoop.get(review.loop_id) || [];
+    existing.push(review);
+    reviewsByLoop.set(review.loop_id, existing);
+  }
+
   const activeLoops: LoopState[] = loopRows
     .filter((row) => row.status !== 'completed' && row.status !== 'failed')
-    .map((row) => ({
-      loopId: row.id,
-      taskIds: JSON.parse(row.task_ids),
-      iteration: row.iteration,
-      maxIterations: row.max_iterations,
-      reviewInterval: row.review_interval,
-      lastReviewAt: row.last_review_at,
-      status: row.status,
-      stuckIndicators: {
-        sameErrorCount: row.same_error_count,
-        noProgressCount: row.no_progress_count,
-        lastError: row.last_error,
-        lastFileChangeIteration: row.last_file_change_iteration,
-        lastActivityAt: row.last_activity_at ?? Date.now(),
-      },
-      output: [],
-      worktreePath: row.worktree_path,
-      phase: row.phase ?? 'build',
-      // Per-loop review tracking (defaults for existing loops)
-      reviewStatus: 'pending' as const,
-      lastReviewId: null,
-      revisionAttempts: 0,
-      lastCheckpointReviewAt: 0,
-    }));
+    .map((row) => {
+      // Compute review state from loop_reviews table
+      const reviews = reviewsByLoop.get(row.id) || [];
+      const mostRecentReview = reviews[0]; // Already sorted DESC by reviewed_at
+
+      let reviewStatus: LoopReviewStatus = 'pending';
+      let lastReviewId: string | null = null;
+      let revisionAttempts = 0;
+
+      if (mostRecentReview) {
+        lastReviewId = mostRecentReview.id;
+        reviewStatus = mostRecentReview.passed ? 'passed' : 'failed';
+
+        // Count consecutive failed reviews from the end
+        if (!mostRecentReview.passed) {
+          for (const review of reviews) {
+            if (review.passed) break;
+            revisionAttempts++;
+          }
+        }
+      }
+
+      return {
+        loopId: row.id,
+        taskIds: JSON.parse(row.task_ids),
+        iteration: row.iteration,
+        maxIterations: row.max_iterations,
+        reviewInterval: row.review_interval,
+        lastReviewAt: row.last_review_at,
+        status: row.status,
+        stuckIndicators: {
+          sameErrorCount: row.same_error_count,
+          noProgressCount: row.no_progress_count,
+          lastError: row.last_error,
+          lastFileChangeIteration: row.last_file_change_iteration,
+          lastActivityAt: row.last_activity_at ?? Date.now(),
+        },
+        output: [],
+        worktreePath: row.worktree_path,
+        phase: row.phase ?? 'build',
+        // Per-loop review tracking (restored from loop_reviews table)
+        reviewStatus,
+        lastReviewId,
+        revisionAttempts,
+        lastCheckpointReviewAt: 0, // Reset on resume - will trigger checkpoint sooner if needed
+      };
+    });
 
   // Load phase history
   const historyRows = db

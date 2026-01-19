@@ -566,4 +566,102 @@ describe('State Persistence', () => {
     assert.deepStrictEqual(loaded.taskGraph.parallelGroups[0], ['task-1', 'task-2']);
     assert.deepStrictEqual(loaded.taskGraph.parallelGroups[1], ['task-3']);
   });
+
+  test('loadState restores per-loop review state from loop_reviews table', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert a loop
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO loops (id, run_id, task_ids, iteration, max_iterations, review_interval, status, phase)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('loop-review-test', state.runId, '["task-a"]', 5, 20, 5, 'running', 'build');
+
+    // Insert loop reviews: pass, fail, fail (most recent first when sorted by reviewed_at DESC)
+    // This simulates: first review passed, then two consecutive failures
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('review-1', state.runId, 'loop-review-test', 'task-a', 1, '2024-01-01 10:00:00');
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('review-2', state.runId, 'loop-review-test', 'task-a', 0, '2024-01-01 11:00:00');
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('review-3', state.runId, 'loop-review-test', 'task-a', 0, '2024-01-01 12:00:00');
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    assert.strictEqual(loaded.activeLoops.length, 1);
+
+    const loop = loaded.activeLoops[0];
+    assert.strictEqual(loop.loopId, 'loop-review-test');
+    // Most recent review (review-3) failed
+    assert.strictEqual(loop.reviewStatus, 'failed');
+    assert.strictEqual(loop.lastReviewId, 'review-3');
+    // Two consecutive failed reviews (review-2, review-3)
+    assert.strictEqual(loop.revisionAttempts, 2);
+  });
+
+  test('loadState resets revisionAttempts to 0 when most recent review passed', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO loops (id, run_id, task_ids, iteration, max_iterations, review_interval, status, phase)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('loop-pass-test', state.runId, '["task-b"]', 3, 20, 5, 'running', 'build');
+
+    // Insert reviews: fail, fail, pass (most recent)
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('r1', state.runId, 'loop-pass-test', 'task-b', 0, '2024-01-01 10:00:00');
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('r2', state.runId, 'loop-pass-test', 'task-b', 0, '2024-01-01 11:00:00');
+    db.prepare(`
+      INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, reviewed_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run('r3', state.runId, 'loop-pass-test', 'task-b', 1, '2024-01-01 12:00:00');
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    const loop = loaded.activeLoops[0];
+    assert.strictEqual(loop.reviewStatus, 'passed');
+    assert.strictEqual(loop.lastReviewId, 'r3');
+    // Most recent passed, so revisionAttempts should be 0
+    assert.strictEqual(loop.revisionAttempts, 0);
+  });
 });
