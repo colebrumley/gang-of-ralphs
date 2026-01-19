@@ -98,58 +98,64 @@ export function initializeState(options: InitStateOptions): OrchestratorState {
 export function saveRun(state: OrchestratorState): void {
   const db = getDatabase();
 
-  // Check if run exists
-  const existing = db.prepare('SELECT id FROM runs WHERE id = ?').get(state.runId);
+  // Wrap all state persistence in a transaction for atomicity
+  // This prevents database corruption if a crash occurs mid-save
+  const saveTransaction = db.transaction(() => {
+    // Check if run exists
+    const existing = db.prepare('SELECT id FROM runs WHERE id = ?').get(state.runId);
 
-  if (existing) {
-    // Update existing run
-    db.prepare(`
-      UPDATE runs SET
-        phase = ?,
-        pending_review = ?,
-        review_type = ?,
-        revision_count = ?,
-        total_cost_usd = ?,
-        updated_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      state.phase,
-      state.pendingReview ? 1 : 0,
-      state.reviewType,
-      state.revisionCount,
-      state.costs.totalCostUsd,
-      state.runId
-    );
-  } else {
-    // Insert new run
-    db.prepare(`
-      INSERT INTO runs (id, spec_path, effort, phase, pending_review, review_type, revision_count,
-        max_loops, max_iterations, total_cost_usd, base_branch, use_worktrees)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      state.runId,
-      state.specPath,
-      state.effort,
-      state.phase,
-      state.pendingReview ? 1 : 0,
-      state.reviewType,
-      state.revisionCount,
-      state.maxLoops,
-      state.maxIterations,
-      state.costs.totalCostUsd,
-      state.baseBranch,
-      state.useWorktrees ? 1 : 0
-    );
-  }
+    if (existing) {
+      // Update existing run
+      db.prepare(`
+        UPDATE runs SET
+          phase = ?,
+          pending_review = ?,
+          review_type = ?,
+          revision_count = ?,
+          total_cost_usd = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        state.phase,
+        state.pendingReview ? 1 : 0,
+        state.reviewType,
+        state.revisionCount,
+        state.costs.totalCostUsd,
+        state.runId
+      );
+    } else {
+      // Insert new run
+      db.prepare(`
+        INSERT INTO runs (id, spec_path, effort, phase, pending_review, review_type, revision_count,
+          max_loops, max_iterations, total_cost_usd, base_branch, use_worktrees)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        state.runId,
+        state.specPath,
+        state.effort,
+        state.phase,
+        state.pendingReview ? 1 : 0,
+        state.reviewType,
+        state.revisionCount,
+        state.maxLoops,
+        state.maxIterations,
+        state.costs.totalCostUsd,
+        state.baseBranch,
+        state.useWorktrees ? 1 : 0
+      );
+    }
 
-  // Persist task status to database
-  saveTasks(state);
+    // Persist task status to database
+    saveTasks(state);
 
-  // Persist loops to database
-  saveLoops(state);
+    // Persist loops to database
+    saveLoops(state);
 
-  // Persist phase history to database
-  savePhaseHistory(state);
+    // Persist phase history to database
+    savePhaseHistory(state);
+  });
+
+  saveTransaction();
 }
 
 /**
