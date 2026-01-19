@@ -21,7 +21,7 @@ export type CostCheckResult = CostExceededResult | CostWithinLimitResult;
  * Check if the total run cost exceeds the per-run limit.
  */
 export function checkRunCostLimit(costs: CostTracking, limits: CostLimits): CostCheckResult {
-  if (costs.totalCostUsd >= limits.perRunMaxUsd) {
+  if (costs.totalCostUsd > limits.perRunMaxUsd) {
     return {
       exceeded: true,
       type: 'run',
@@ -41,7 +41,7 @@ export function checkPhaseCostLimit(
   limits: CostLimits
 ): CostCheckResult {
   const phaseCost = costs.phaseCosts[phase] ?? 0;
-  if (phaseCost >= limits.perPhaseMaxUsd) {
+  if (phaseCost > limits.perPhaseMaxUsd) {
     return {
       exceeded: true,
       type: 'phase',
@@ -62,7 +62,7 @@ export function checkLoopCostLimit(
   limits: CostLimits
 ): CostCheckResult {
   const loopCost = costs.loopCosts[loopId] ?? 0;
-  if (loopCost >= limits.perLoopMaxUsd) {
+  if (loopCost > limits.perLoopMaxUsd) {
     return {
       exceeded: true,
       type: 'loop',
@@ -113,10 +113,10 @@ export function formatCostExceededError(result: CostExceededResult): string {
 
   switch (result.type) {
     case 'run':
-      return `Run cost limit exceeded: ${current} >= ${limit}`;
+      return `Run cost limit exceeded: ${current} > ${limit}`;
     case 'phase':
-      return `Phase '${result.phase}' cost limit exceeded: ${current} >= ${limit}`;
+      return `Phase '${result.phase}' cost limit exceeded: ${current} > ${limit}`;
     case 'loop':
-      return `Loop '${result.loopId}' cost limit exceeded: ${current} >= ${limit}`;
+      return `Loop '${result.loopId}' cost limit exceeded: ${current} > ${limit}`;
   }
 }

@@ -37,15 +37,10 @@ describe('cost enforcement', () => {
       assert.strictEqual(result.exceeded, false);
     });
 
-    it('returns exceeded=true when cost equals limit', () => {
+    it('returns exceeded=false when cost equals limit', () => {
       const costs: CostTracking = { ...defaultCosts, totalCostUsd: 5.0 };
       const result = checkRunCostLimit(costs, defaultLimits);
-      assert.strictEqual(result.exceeded, true);
-      if (result.exceeded) {
-        assert.strictEqual(result.type, 'run');
-        assert.strictEqual(result.current, 5.0);
-        assert.strictEqual(result.limit, 5.0);
-      }
+      assert.strictEqual(result.exceeded, false);
     });
 
     it('returns exceeded=true when cost exceeds limit', () => {
@@ -70,19 +65,13 @@ describe('cost enforcement', () => {
       assert.strictEqual(result.exceeded, false);
     });
 
-    it('returns exceeded=true when phase cost equals limit', () => {
+    it('returns exceeded=false when phase cost equals limit', () => {
       const costs: CostTracking = {
         ...defaultCosts,
         phaseCosts: { ...defaultCosts.phaseCosts, build: 2.0 },
       };
       const result = checkPhaseCostLimit('build', costs, defaultLimits);
-      assert.strictEqual(result.exceeded, true);
-      if (result.exceeded) {
-        assert.strictEqual(result.type, 'phase');
-        assert.strictEqual(result.phase, 'build');
-        assert.strictEqual(result.current, 2.0);
-        assert.strictEqual(result.limit, 2.0);
-      }
+      assert.strictEqual(result.exceeded, false);
     });
 
     it('returns exceeded=false for phase with no recorded cost', () => {
@@ -101,19 +90,13 @@ describe('cost enforcement', () => {
       assert.strictEqual(result.exceeded, false);
     });
 
-    it('returns exceeded=true when loop cost equals limit', () => {
+    it('returns exceeded=false when loop cost equals limit', () => {
       const costs: CostTracking = {
         ...defaultCosts,
         loopCosts: { 'loop-1': 1.0 },
       };
       const result = checkLoopCostLimit('loop-1', costs, defaultLimits);
-      assert.strictEqual(result.exceeded, true);
-      if (result.exceeded) {
-        assert.strictEqual(result.type, 'loop');
-        assert.strictEqual(result.loopId, 'loop-1');
-        assert.strictEqual(result.current, 1.0);
-        assert.strictEqual(result.limit, 1.0);
-      }
+      assert.strictEqual(result.exceeded, false);
     });
 
     it('returns exceeded=false for unknown loop', () => {
@@ -181,7 +164,7 @@ describe('cost enforcement', () => {
         current: 5.5,
         limit: 5.0,
       });
-      assert.strictEqual(msg, 'Run cost limit exceeded: $5.50 >= $5.00');
+      assert.strictEqual(msg, 'Run cost limit exceeded: $5.50 > $5.00');
     });
 
     it('formats phase cost exceeded error', () => {
@@ -192,7 +175,7 @@ describe('cost enforcement', () => {
         limit: 2.0,
         phase: 'build',
       });
-      assert.strictEqual(msg, "Phase 'build' cost limit exceeded: $2.25 >= $2.00");
+      assert.strictEqual(msg, "Phase 'build' cost limit exceeded: $2.25 > $2.00");
     });
 
     it('formats loop cost exceeded error', () => {
@@ -203,7 +186,7 @@ describe('cost enforcement', () => {
         limit: 1.0,
         loopId: 'loop-abc123',
       });
-      assert.strictEqual(msg, "Loop 'loop-abc123' cost limit exceeded: $1.10 >= $1.00");
+      assert.strictEqual(msg, "Loop 'loop-abc123' cost limit exceeded: $1.10 > $1.00");
     });
   });
 });
