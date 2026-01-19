@@ -148,6 +148,16 @@ export const SetCodebaseAnalysisSchema = z.object({
   summary: z.string(),
 });
 
+export const WriteScratchpadSchema = z.object({
+  loopId: z.string().describe('The loop this scratchpad belongs to'),
+  done: z.string().describe('What you completed this iteration'),
+  testStatus: z.string().describe('Test results (pass/fail + key output)'),
+  nextStep: z.string().describe('What the next iteration should do'),
+  blockers: z.string().describe('Any blockers, or "none"'),
+});
+
+export type WriteScratchpad = z.infer<typeof WriteScratchpadSchema>;
+
 export type WriteTask = z.infer<typeof WriteTaskSchema>;
 export type CompleteTask = z.infer<typeof CompleteTaskSchema>;
 export type FailTask = z.infer<typeof FailTaskSchema>;
