@@ -13,6 +13,7 @@ import {
   PersistLoopStateSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
+  SetCodebaseAnalysisSchema,
   SetLoopReviewResultSchema,
   SetReviewResultSchema,
   UpdateLoopStatusSchema,
@@ -323,6 +324,56 @@ export function createMCPServer(runId: string, dbPath: string) {
           required: ['phase', 'costUsd'],
         },
       },
+      {
+        name: 'set_codebase_analysis',
+        description: 'Store the codebase analysis results from the analyze phase',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            projectType: {
+              type: 'string',
+              description: 'Type of project (e.g., "TypeScript Node.js CLI")',
+            },
+            techStack: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Technologies/frameworks used',
+            },
+            directoryStructure: {
+              type: 'string',
+              description: 'Brief description of code organization',
+            },
+            existingFeatures: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Features the codebase already implements',
+            },
+            entryPoints: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Main entry point files',
+            },
+            patterns: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Key patterns and conventions observed',
+            },
+            summary: {
+              type: 'string',
+              description: '2-3 sentence summary of what the codebase does',
+            },
+          },
+          required: [
+            'projectType',
+            'techStack',
+            'directoryStructure',
+            'existingFeatures',
+            'entryPoints',
+            'patterns',
+            'summary',
+          ],
+        },
+      },
     ],
   }));
 
@@ -595,6 +646,17 @@ export function createMCPServer(runId: string, dbPath: string) {
           ON CONFLICT(run_id, phase) DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd
         `).run(runId, phase, costUsd);
         result = { content: [{ type: 'text', text: `Phase ${phase} cost $${costUsd} recorded` }] };
+        break;
+      }
+
+      case 'set_codebase_analysis': {
+        const analysis = SetCodebaseAnalysisSchema.parse(args);
+        db.prepare(`
+          UPDATE runs SET codebase_analysis = ? WHERE id = ?
+        `).run(JSON.stringify(analysis), runId);
+        result = {
+          content: [{ type: 'text', text: `Codebase analysis stored: ${analysis.projectType}` }],
+        };
         break;
       }
 

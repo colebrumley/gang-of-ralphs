@@ -138,6 +138,16 @@ export const RecordPhaseCostSchema = z.object({
   costUsd: z.number().describe('Cost in USD'),
 });
 
+export const SetCodebaseAnalysisSchema = z.object({
+  projectType: z.string(),
+  techStack: z.array(z.string()),
+  directoryStructure: z.string(),
+  existingFeatures: z.array(z.string()),
+  entryPoints: z.array(z.string()),
+  patterns: z.array(z.string()),
+  summary: z.string(),
+});
+
 export type WriteTask = z.infer<typeof WriteTaskSchema>;
 export type CompleteTask = z.infer<typeof CompleteTaskSchema>;
 export type FailTask = z.infer<typeof FailTaskSchema>;

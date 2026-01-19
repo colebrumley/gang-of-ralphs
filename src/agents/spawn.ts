@@ -31,6 +31,7 @@ const MCP_TOOLS = [
   'mcp__sq-db__create_loop',
   'mcp__sq-db__persist_loop_state',
   'mcp__sq-db__record_phase_cost',
+  'mcp__sq-db__set_codebase_analysis',
 ];
 
 const PHASE_TOOLS: Record<Phase, string[]> = {
