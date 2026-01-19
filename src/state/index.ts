@@ -106,6 +106,7 @@ export function initializeState(options: InitStateOptions): OrchestratorState {
     useWorktrees,
     debug: options.debug ?? false,
     pendingConflicts: [],
+    wasEmptyProject: null, // Will be set during ENUMERATE phase
   };
 }
 
@@ -127,6 +128,7 @@ export function saveRun(state: OrchestratorState): void {
           review_type = ?,
           revision_count = ?,
           total_cost_usd = ?,
+          was_empty_project = ?,
           updated_at = datetime('now')
         WHERE id = ?
       `).run(
@@ -135,14 +137,15 @@ export function saveRun(state: OrchestratorState): void {
         state.reviewType,
         state.revisionCount,
         state.costs.totalCostUsd,
+        state.wasEmptyProject === null ? null : state.wasEmptyProject ? 1 : 0,
         state.runId
       );
     } else {
       // Insert new run
       db.prepare(`
         INSERT INTO runs (id, spec_path, effort, phase, pending_review, review_type, revision_count,
-          max_loops, max_iterations, total_cost_usd, base_branch, use_worktrees)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          max_loops, max_iterations, total_cost_usd, base_branch, use_worktrees, was_empty_project)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         state.runId,
         state.specPath,
@@ -155,7 +158,8 @@ export function saveRun(state: OrchestratorState): void {
         state.maxIterations,
         state.costs.totalCostUsd,
         state.baseBranch,
-        state.useWorktrees ? 1 : 0
+        state.useWorktrees ? 1 : 0,
+        state.wasEmptyProject === null ? null : state.wasEmptyProject ? 1 : 0
       );
     }
 
@@ -346,6 +350,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
         total_cost_usd: number;
         base_branch: string | null;
         use_worktrees: number;
+        was_empty_project: number | null;
       }
     | undefined;
 
@@ -614,6 +619,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     useWorktrees: run.use_worktrees === 1,
     debug: false, // Runtime option, not persisted
     pendingConflicts: [],
+    wasEmptyProject: run.was_empty_project === null ? null : run.was_empty_project === 1,
   };
 }
 

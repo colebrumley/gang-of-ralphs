@@ -71,6 +71,7 @@ describe('Dry Run Summary', () => {
       useWorktrees: true,
       debug: false,
       pendingConflicts: [],
+      wasEmptyProject: null,
     };
 
     // Should not throw
@@ -122,6 +123,7 @@ describe('Dry Run Summary', () => {
       useWorktrees: true,
       debug: false,
       pendingConflicts: [],
+      wasEmptyProject: null,
     };
 
     // Should not throw

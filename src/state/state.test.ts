@@ -953,4 +953,125 @@ describe('State Persistence', () => {
     assert.strictEqual(loaded.context.discoveries[1], 'Middle discovery');
     assert.strictEqual(loaded.context.discoveries[2], 'Newest discovery');
   });
+
+  test('wasEmptyProject defaults to null in initial state', () => {
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    assert.strictEqual(state.wasEmptyProject, null);
+  });
+
+  test('saveRun persists wasEmptyProject=true', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    // Simulate ENUMERATE phase setting wasEmptyProject
+    state.wasEmptyProject = true;
+    saveRun(state);
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    assert.strictEqual(loaded.wasEmptyProject, true);
+  });
+
+  test('saveRun persists wasEmptyProject=false', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    state.wasEmptyProject = false;
+    saveRun(state);
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    assert.strictEqual(loaded.wasEmptyProject, false);
+  });
+
+  test('saveRun persists wasEmptyProject=null', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    // Leave wasEmptyProject as null (default)
+    saveRun(state);
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    assert.strictEqual(loaded.wasEmptyProject, null);
+  });
+
+  test('wasEmptyProject survives save/load cycle through phase transitions', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    // Simulate ENUMERATE phase completing
+    state.wasEmptyProject = true;
+    state.phase = 'plan';
+    saveRun(state);
+
+    closeDatabase();
+    const loaded1 = loadState(tempDir);
+
+    assert.ok(loaded1);
+    assert.strictEqual(loaded1.wasEmptyProject, true);
+    assert.strictEqual(loaded1.phase, 'plan');
+
+    // Simulate PLAN phase completing
+    loaded1.phase = 'build';
+    saveRun(loaded1);
+
+    closeDatabase();
+    const loaded2 = loadState(tempDir);
+
+    assert.ok(loaded2);
+    // wasEmptyProject should still be preserved
+    assert.strictEqual(loaded2.wasEmptyProject, true);
+    assert.strictEqual(loaded2.phase, 'build');
+  });
 });

@@ -114,4 +114,5 @@ export const OrchestratorStateSchema = z.object({
       conflictFiles: z.array(z.string()),
     })
   ),
+  wasEmptyProject: z.boolean().nullable(),
 });

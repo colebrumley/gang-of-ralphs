@@ -119,6 +119,7 @@ export function loadTasksFromDB(runId: string): Task[] {
 export interface EnumerateResult {
   tasks: Task[];
   costUsd: number;
+  wasEmptyProject: boolean;
 }
 
 export async function executeEnumerate(
@@ -133,8 +134,12 @@ export async function executeEnumerate(
   const config = createAgentConfig('enumerate', process.cwd(), state.runId, dbPath, model);
   const cwd = process.cwd();
 
-  // Only include scaffolding instructions for empty/new projects
-  const isEmpty = await isEmptyProject(cwd, state.specPath);
+  // Use persisted wasEmptyProject if available (crash recovery), otherwise check now
+  // This prevents race conditions where files created by ENUMERATE affect PLAN's check
+  const isEmpty =
+    state.wasEmptyProject !== null
+      ? state.wasEmptyProject
+      : await isEmptyProject(cwd, state.specPath);
   const scaffoldSection = isEmpty ? SCAFFOLD_SECTION_ENUMERATE : '';
   const basePrompt = ENUMERATE_PROMPT.replace('{{SCAFFOLD_SECTION}}', scaffoldSection);
 
@@ -239,5 +244,6 @@ ${specContent}`;
   return {
     tasks,
     costUsd,
+    wasEmptyProject: isEmpty,
   };
 }

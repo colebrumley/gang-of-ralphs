@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS runs (
   base_branch TEXT,
   use_worktrees INTEGER NOT NULL DEFAULT 1,
   interpreted_intent TEXT,
-  intent_satisfied INTEGER
+  intent_satisfied INTEGER,
+  was_empty_project INTEGER  -- NULL means not yet checked, 0 = false, 1 = true
 );
 
 -- Tasks table: enumerated tasks for a run

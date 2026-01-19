@@ -98,4 +98,8 @@ export interface OrchestratorState {
     taskId: string;
     conflictFiles: string[];
   }>;
+
+  // Scaffolding detection - persisted once at run start to avoid race conditions
+  // between ENUMERATE and PLAN phases (Risk #3 mitigation for scaffold detection)
+  wasEmptyProject: boolean | null; // null means not yet checked
 }

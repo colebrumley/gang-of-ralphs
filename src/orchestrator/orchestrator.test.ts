@@ -49,6 +49,7 @@ function createTestState(overrides: Partial<OrchestratorState> = {}): Orchestrat
     useWorktrees: false,
     debug: false,
     pendingConflicts: [],
+    wasEmptyProject: null,
     ...overrides,
   };
 }

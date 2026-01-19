@@ -13,7 +13,8 @@ import {
   isStreamEventMessage,
   isToolProgressMessage,
 } from '../../types/index.js';
-import { isEmptyProject } from './enumerate.js';
+// Note: We no longer import isEmptyProject here - we use state.wasEmptyProject
+// which was set during ENUMERATE phase to avoid race conditions
 
 /**
  * Load plan groups from database after agent has written them via MCP tools.
@@ -50,8 +51,9 @@ export async function executePlan(
   const model = getModelId(effortConfig.models.plan);
   const config = createAgentConfig('plan', cwd, state.runId, dbPath, model);
 
-  // Only include scaffolding instructions for empty/new projects
-  const isEmpty = await isEmptyProject(cwd, state.specPath);
+  // Use persisted wasEmptyProject from ENUMERATE phase to avoid race conditions
+  // where files created by ENUMERATE would make isEmptyProject() return false here
+  const isEmpty = state.wasEmptyProject ?? false;
   const scaffoldSection = isEmpty ? SCAFFOLD_SECTION_PLAN : '';
   const basePrompt = PLAN_PROMPT.replace('{{SCAFFOLD_PLAN_SECTION}}', scaffoldSection);
 
