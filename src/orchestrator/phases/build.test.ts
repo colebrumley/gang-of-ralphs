@@ -119,7 +119,10 @@ describe('Build Phase', () => {
 
     const prompt = buildPromptWithFeedback(task, issues, 1, 10);
 
-    assert.ok(prompt.includes('Previous Review Feedback'), 'Should include feedback header');
+    assert.ok(
+      prompt.includes('Review Feedback from Previous Attempt'),
+      'Should include feedback header'
+    );
     assert.ok(prompt.includes('src/index.ts:42'), 'Should include file and line');
     assert.ok(prompt.includes('Unnecessary wrapper'), 'Should include description');
     assert.ok(prompt.includes('Inline the code'), 'Should include suggestion');
@@ -139,7 +142,10 @@ describe('Build Phase', () => {
 
     const prompt = buildPromptWithFeedback(task, [], 1, 10);
 
-    assert.ok(!prompt.includes('Previous Review Feedback'), 'Should not include feedback header');
+    assert.ok(
+      !prompt.includes('Review Feedback from Previous Attempt'),
+      'Should not include feedback header'
+    );
     assert.ok(prompt.includes('Task 1'), 'Should include task title');
   });
 
@@ -194,7 +200,7 @@ describe('Build Phase', () => {
 
     // Review feedback should come after static content
     const buildPromptEnd = prompt.indexOf(BUILD_PROMPT) + BUILD_PROMPT.length;
-    const feedbackIndex = prompt.indexOf('Previous Review Feedback');
+    const feedbackIndex = prompt.indexOf('Review Feedback from Previous Attempt');
     assert.ok(
       feedbackIndex > buildPromptEnd,
       'Review feedback must come after static BUILD_PROMPT for cache efficiency'
