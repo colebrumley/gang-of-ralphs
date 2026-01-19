@@ -117,6 +117,16 @@ CREATE TABLE IF NOT EXISTS phase_costs (
   PRIMARY KEY (run_id, phase)
 );
 
+-- Pending conflicts: merge conflicts waiting for resolution
+CREATE TABLE IF NOT EXISTS pending_conflicts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  loop_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  conflict_files TEXT NOT NULL, -- JSON array of file paths
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
@@ -126,3 +136,4 @@ CREATE INDEX IF NOT EXISTS idx_review_issues_loop ON review_issues(loop_id);
 CREATE INDEX IF NOT EXISTS idx_phase_costs_run ON phase_costs(run_id);
 CREATE INDEX IF NOT EXISTS idx_loop_reviews_run ON loop_reviews(run_id);
 CREATE INDEX IF NOT EXISTS idx_loop_reviews_loop ON loop_reviews(loop_id);
+CREATE INDEX IF NOT EXISTS idx_pending_conflicts_run ON pending_conflicts(run_id);

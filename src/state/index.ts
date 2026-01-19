@@ -170,6 +170,9 @@ export function saveRun(state: OrchestratorState): void {
 
     // Persist phase costs to database
     savePhaseCosts(state);
+
+    // Persist pending conflicts to database
+    savePendingConflicts(state);
   });
 
   saveTransaction();
@@ -279,6 +282,34 @@ function saveLoops(state: OrchestratorState): void {
       loop.worktreePath,
       loop.phase
     );
+  }
+}
+
+/**
+ * Persist pending conflicts to the database.
+ * Replaces all existing conflicts with current state to handle both additions and removals.
+ */
+function savePendingConflicts(state: OrchestratorState): void {
+  const db = getDatabase();
+
+  // Delete all existing pending conflicts for this run
+  db.prepare('DELETE FROM pending_conflicts WHERE run_id = ?').run(state.runId);
+
+  // Insert current pending conflicts
+  if (state.pendingConflicts.length > 0) {
+    const stmt = db.prepare(`
+      INSERT INTO pending_conflicts (run_id, loop_id, task_id, conflict_files)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    for (const conflict of state.pendingConflicts) {
+      stmt.run(
+        state.runId,
+        conflict.loopId,
+        conflict.taskId,
+        JSON.stringify(conflict.conflictFiles)
+      );
+    }
   }
 }
 
@@ -582,6 +613,24 @@ export function loadState(stateDir: string): OrchestratorState | null {
     phaseCosts[row.phase] = row.cost_usd;
   }
 
+  // Load pending conflicts from database
+  const pendingConflictRows = db
+    .prepare(`
+    SELECT loop_id, task_id, conflict_files FROM pending_conflicts
+    WHERE run_id = ? ORDER BY id
+  `)
+    .all(run.id) as Array<{
+    loop_id: string;
+    task_id: string;
+    conflict_files: string;
+  }>;
+
+  const pendingConflicts = pendingConflictRows.map((row) => ({
+    loopId: row.loop_id,
+    taskId: row.task_id,
+    conflictFiles: JSON.parse(row.conflict_files) as string[],
+  }));
+
   return {
     runId: run.id,
     specPath: run.spec_path,
@@ -613,7 +662,7 @@ export function loadState(stateDir: string): OrchestratorState | null {
     baseBranch: run.base_branch,
     useWorktrees: run.use_worktrees === 1,
     debug: false, // Runtime option, not persisted
-    pendingConflicts: [],
+    pendingConflicts,
   };
 }
 
