@@ -3,7 +3,8 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
-import { EnumerateIncompleteError, isEmptyProject, validateTaskGranularity } from './enumerate.js';
+import { isEmptyProject } from './analyze.js';
+import { EnumerateIncompleteError, validateTaskGranularity } from './enumerate.js';
 
 describe('Enumerate Phase', () => {
   // NOTE: Task creation now happens via MCP tools (write_task)

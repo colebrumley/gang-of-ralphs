@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
@@ -23,16 +23,6 @@ import {
 // Task granularity bounds (Risk #5 mitigation)
 const MIN_ESTIMATED_ITERATIONS = 3;
 const MAX_ESTIMATED_ITERATIONS = 25;
-
-// Files/directories to ignore when checking if a project is empty
-const IGNORED_ENTRIES = new Set([
-  '.git',
-  '.sq',
-  '.gitignore',
-  '.gitkeep',
-  'node_modules',
-  '.DS_Store',
-]);
 
 /**
  * Format codebase analysis for injection into ENUMERATE_PROMPT.
@@ -63,29 +53,6 @@ function formatCodebaseAnalysis(analysis: CodebaseAnalysis | null): string {
         : '- None detected'
     )
     .replace('{{summary}}', analysis.summary);
-}
-
-/**
- * Check if a directory is effectively empty (new project).
- * Returns true if directory contains only ignored files/dirs or spec files.
- */
-export async function isEmptyProject(dir: string, specPath: string): Promise<boolean> {
-  try {
-    const entries = await readdir(dir);
-    const significantEntries = entries.filter((entry) => {
-      // Ignore common non-project files
-      if (IGNORED_ENTRIES.has(entry)) return false;
-      // Ignore the spec file itself
-      if (specPath.endsWith(entry)) return false;
-      // Ignore markdown files (often just specs/docs)
-      if (entry.endsWith('.md')) return false;
-      return true;
-    });
-    return significantEntries.length === 0;
-  } catch {
-    // If we can't read the directory, assume it's not empty
-    return false;
-  }
 }
 
 export interface GranularityValidation {
@@ -185,12 +152,8 @@ export async function executeEnumerate(
   const config = createAgentConfig('enumerate', process.cwd(), state.runId, dbPath, model);
   const cwd = process.cwd();
 
-  // Use persisted wasEmptyProject if available (crash recovery), otherwise check now
-  // This prevents race conditions where files created by ENUMERATE affect PLAN's check
-  const isEmpty =
-    state.wasEmptyProject !== null
-      ? state.wasEmptyProject
-      : await isEmptyProject(cwd, state.specPath);
+  // Use wasEmptyProject from ANALYZE phase (should always be set by now)
+  const isEmpty = state.wasEmptyProject ?? false;
   const scaffoldSection = isEmpty ? SCAFFOLD_SECTION_ENUMERATE : '';
 
   // Inject codebase analysis from ANALYZE phase
