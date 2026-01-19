@@ -6,6 +6,7 @@ import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig, getModelId } from '../../config/effort.js';
 import { getDatabase } from '../../db/index.js';
 import type { DebugTracer } from '../../debug/index.js';
+import { SetCodebaseAnalysisSchema } from '../../mcp/tools.js';
 import { MCP_SERVER_PATH } from '../../paths.js';
 import type { CodebaseAnalysis, OrchestratorState } from '../../types/index.js';
 import {
@@ -77,7 +78,7 @@ export function loadAnalysisFromDB(runId: string): CodebaseAnalysis | null {
     return null;
   }
 
-  return JSON.parse(row.codebase_analysis) as CodebaseAnalysis;
+  return SetCodebaseAnalysisSchema.parse(JSON.parse(row.codebase_analysis));
 }
 
 export async function executeAnalyze(

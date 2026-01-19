@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getEffortConfig } from '../config/effort.js';
 import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
+import { SetCodebaseAnalysisSchema } from '../mcp/tools.js';
 
 /**
  * Maximum number of context entries to keep per type (discovery, error, decision).
@@ -676,7 +677,9 @@ export function loadState(stateDir: string): OrchestratorState | null {
     debug: false, // Runtime option, not persisted
     pendingConflicts,
     wasEmptyProject: run.was_empty_project === null ? null : run.was_empty_project === 1,
-    codebaseAnalysis: run.codebase_analysis ? JSON.parse(run.codebase_analysis) : null,
+    codebaseAnalysis: run.codebase_analysis
+      ? SetCodebaseAnalysisSchema.parse(JSON.parse(run.codebase_analysis))
+      : null,
   };
 }
 
