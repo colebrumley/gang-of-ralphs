@@ -22,6 +22,10 @@ describe('Stuck Detection', () => {
     output: [],
     worktreePath: null,
     phase: 'build',
+    reviewStatus: 'pending',
+    lastReviewId: null,
+    revisionAttempts: 0,
+    lastCheckpointReviewAt: 0,
   };
 
   test('returns null when not stuck', () => {

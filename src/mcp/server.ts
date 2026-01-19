@@ -13,6 +13,7 @@ import {
   PersistLoopStateSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
+  SetLoopReviewResultSchema,
   SetReviewResultSchema,
   UpdateLoopStatusSchema,
   WriteTaskSchema,
@@ -216,6 +217,55 @@ export function createMCPServer(runId: string, dbPath: string) {
         },
       },
       {
+        name: 'set_loop_review_result',
+        description: 'Report review results for a specific loop',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            loopId: { type: 'string', description: 'The loop being reviewed' },
+            taskId: {
+              type: 'string',
+              description: 'The task that was reviewed (optional for checkpoint reviews)',
+            },
+            passed: { type: 'boolean', description: 'Whether review passed' },
+            interpretedIntent: {
+              type: 'string',
+              description: 'What the task was really trying to accomplish',
+            },
+            intentSatisfied: {
+              type: 'boolean',
+              description: 'Does the implementation serve the interpreted intent?',
+            },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  file: { type: 'string', description: 'File path where the issue was found' },
+                  line: { type: 'number', description: 'Line number of the issue' },
+                  type: {
+                    type: 'string',
+                    enum: [
+                      'over-engineering',
+                      'missing-error-handling',
+                      'pattern-violation',
+                      'dead-code',
+                      'spec-intent-mismatch',
+                    ],
+                    description: 'Type of issue',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'Suggested fix' },
+                },
+                required: ['file', 'type', 'description', 'suggestion'],
+              },
+              description: 'Structured review issues found',
+            },
+          },
+          required: ['loopId', 'passed'],
+        },
+      },
+      {
         name: 'create_loop',
         description: 'Create a new execution loop for parallel task processing',
         inputSchema: {
@@ -378,9 +428,9 @@ export function createMCPServer(runId: string, dbPath: string) {
 
       case 'set_review_result': {
         const review = SetReviewResultSchema.parse(args);
-        // Clear previous review issues for this run
+        // Clear previous review issues for this run (only run-level reviews, not loop reviews)
         db.prepare(`
-          DELETE FROM review_issues WHERE run_id = ?
+          DELETE FROM review_issues WHERE run_id = ? AND loop_id IS NULL
         `).run(runId);
         // Store structured review issues
         for (const issue of review.issues) {
@@ -413,6 +463,59 @@ export function createMCPServer(runId: string, dbPath: string) {
             {
               type: 'text',
               text: `Review result: ${finalPassed ? 'PASSED' : 'FAILED'} (${review.issues.length} issues, intent ${review.intentSatisfied ? 'satisfied' : 'NOT satisfied'})`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'set_loop_review_result': {
+        const review = SetLoopReviewResultSchema.parse(args);
+        const reviewId = crypto.randomUUID();
+
+        // Insert the loop review record
+        db.prepare(`
+          INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied, cost_usd)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(
+          reviewId,
+          runId,
+          review.loopId,
+          review.taskId ?? null,
+          review.passed ? 1 : 0,
+          review.interpretedIntent ?? null,
+          review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
+        );
+
+        // Store structured review issues with loop context
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion, loop_id, loop_review_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            runId,
+            review.taskId ?? 'checkpoint',
+            issue.file,
+            issue.line ?? null,
+            issue.type,
+            issue.description,
+            issue.suggestion,
+            review.loopId,
+            reviewId
+          );
+        }
+
+        const intentStatus =
+          review.intentSatisfied != null
+            ? review.intentSatisfied
+              ? 'satisfied'
+              : 'NOT satisfied'
+            : 'not evaluated';
+        result = {
+          content: [
+            {
+              type: 'text',
+              text: `Loop review ${reviewId}: ${review.passed ? 'PASSED' : 'FAILED'} (${review.issues.length} issues, intent ${intentStatus})`,
             },
           ],
         };

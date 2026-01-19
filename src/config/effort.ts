@@ -22,6 +22,10 @@ export interface EffortConfig {
   stuckThreshold: number; // Same error count before flagging stuck
   maxRevisions: number; // Max BUILD→REVIEW→REVISE cycles before stopping
 
+  // Per-loop review settings
+  checkpointReviewInterval: number | null; // Iterations between checkpoint reviews (null = disabled)
+  maxRevisionAttempts: number; // Max revision attempts per task before marking loop stuck
+
   // Cost limits (Risk #3 mitigation)
   costLimits: CostLimits;
 
@@ -37,6 +41,8 @@ const EFFORT_CONFIGS: Record<EffortLevel, EffortConfig> = {
     reviewDepth: 'shallow',
     stuckThreshold: 5,
     maxRevisions: 10,
+    checkpointReviewInterval: null, // No checkpoint reviews
+    maxRevisionAttempts: 2,
     costLimits: { perLoopMaxUsd: 1.0, perPhaseMaxUsd: 2.0, perRunMaxUsd: 5.0 },
     models: {
       enumerate: 'haiku',
@@ -54,6 +60,8 @@ const EFFORT_CONFIGS: Record<EffortLevel, EffortConfig> = {
     reviewDepth: 'standard',
     stuckThreshold: 4,
     maxRevisions: 8,
+    checkpointReviewInterval: 5, // Every 5 iterations
+    maxRevisionAttempts: 3,
     costLimits: { perLoopMaxUsd: 2.0, perPhaseMaxUsd: 5.0, perRunMaxUsd: 15.0 },
     models: {
       enumerate: 'sonnet',
@@ -71,6 +79,8 @@ const EFFORT_CONFIGS: Record<EffortLevel, EffortConfig> = {
     reviewDepth: 'deep',
     stuckThreshold: 3,
     maxRevisions: 5,
+    checkpointReviewInterval: 3, // Every 3 iterations
+    maxRevisionAttempts: 4,
     costLimits: { perLoopMaxUsd: 5.0, perPhaseMaxUsd: 10.0, perRunMaxUsd: 30.0 },
     models: {
       enumerate: 'sonnet',
@@ -88,6 +98,8 @@ const EFFORT_CONFIGS: Record<EffortLevel, EffortConfig> = {
     reviewDepth: 'comprehensive',
     stuckThreshold: 2,
     maxRevisions: 3,
+    checkpointReviewInterval: 1, // Every iteration
+    maxRevisionAttempts: 5,
     costLimits: { perLoopMaxUsd: 10.0, perPhaseMaxUsd: 25.0, perRunMaxUsd: 100.0 },
     models: {
       enumerate: 'opus',

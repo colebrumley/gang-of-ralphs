@@ -76,6 +76,10 @@ describe('Loop Manager', () => {
       output: ['line1', 'line2'],
       worktreePath: '/path/to/worktree',
       phase: 'build',
+      reviewStatus: 'pending' as const,
+      lastReviewId: null,
+      revisionAttempts: 0,
+      lastCheckpointReviewAt: 0,
     };
 
     manager.restoreLoop(persistedLoop);

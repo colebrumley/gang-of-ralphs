@@ -492,6 +492,10 @@ describe('State Persistence', () => {
         output: [],
         worktreePath: '/path/to/worktree',
         phase: 'build',
+        reviewStatus: 'pending',
+        lastReviewId: null,
+        revisionAttempts: 0,
+        lastCheckpointReviewAt: 0,
       },
     ];
     state.costs.loopCosts['loop-test'] = 0.33;

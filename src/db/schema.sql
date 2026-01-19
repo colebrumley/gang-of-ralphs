@@ -91,7 +91,22 @@ CREATE TABLE IF NOT EXISTS review_issues (
   type TEXT NOT NULL CHECK (type IN ('over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code', 'spec-intent-mismatch')),
   description TEXT NOT NULL,
   suggestion TEXT NOT NULL,
+  loop_id TEXT,                           -- which loop produced this issue (null for run-level reviews)
+  loop_review_id TEXT,                    -- references loop_reviews.id
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Loop reviews: per-loop review results
+CREATE TABLE IF NOT EXISTS loop_reviews (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  loop_id TEXT NOT NULL REFERENCES loops(id),
+  task_id TEXT,                           -- which task was reviewed (null for checkpoint reviews)
+  passed INTEGER NOT NULL,                -- 0 or 1
+  interpreted_intent TEXT,
+  intent_satisfied INTEGER,               -- 0, 1, or null
+  reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
+  cost_usd REAL DEFAULT 0
 );
 
 -- Phase costs: accumulated costs per phase per run
@@ -107,4 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
 CREATE INDEX IF NOT EXISTS idx_phase_history_run ON phase_history(run_id);
 CREATE INDEX IF NOT EXISTS idx_review_issues_run ON review_issues(run_id);
+CREATE INDEX IF NOT EXISTS idx_review_issues_loop ON review_issues(loop_id);
 CREATE INDEX IF NOT EXISTS idx_phase_costs_run ON phase_costs(run_id);
+CREATE INDEX IF NOT EXISTS idx_loop_reviews_run ON loop_reviews(run_id);
+CREATE INDEX IF NOT EXISTS idx_loop_reviews_loop ON loop_reviews(loop_id);

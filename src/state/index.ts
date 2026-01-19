@@ -352,6 +352,11 @@ export function loadState(stateDir: string): OrchestratorState | null {
       output: [],
       worktreePath: row.worktree_path,
       phase: row.phase ?? 'build',
+      // Per-loop review tracking (defaults for existing loops)
+      reviewStatus: 'pending' as const,
+      lastReviewId: null,
+      revisionAttempts: 0,
+      lastCheckpointReviewAt: 0,
     }));
 
   // Load phase history

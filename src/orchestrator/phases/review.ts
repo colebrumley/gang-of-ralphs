@@ -6,10 +6,12 @@ import { getDatabase } from '../../db/index.js';
 import type { DebugTracer } from '../../debug/index.js';
 import { MCP_SERVER_PATH } from '../../paths.js';
 import type {
+  LoopState,
   OrchestratorState,
   ReviewIssue,
   ReviewIssueType,
   ReviewType,
+  Task,
 } from '../../types/index.js';
 
 export interface ReviewResult {
@@ -593,6 +595,344 @@ File: ${state.specPath}`;
     issues,
     suggestions: [],
     costUsd,
+    interpretedIntent,
+    intentSatisfied,
+  };
+}
+
+// ============================================================================
+// Loop Review Functions
+// ============================================================================
+
+export interface LoopReviewResult {
+  passed: boolean;
+  issues: ReviewIssue[];
+  costUsd: number;
+  reviewId: string;
+  interpretedIntent?: string;
+  intentSatisfied?: boolean;
+}
+
+/**
+ * Load the most recent loop review result from the database.
+ */
+export function loadLoopReviewResultFromDB(
+  runId: string,
+  loopId: string
+): {
+  reviewId: string | null;
+  passed: boolean;
+  issues: ReviewIssue[];
+  interpretedIntent?: string;
+  intentSatisfied?: boolean;
+} {
+  const db = getDatabase();
+
+  // Get the most recent loop review for this loop
+  const review = db
+    .prepare(
+      `SELECT id, passed, interpreted_intent, intent_satisfied
+       FROM loop_reviews
+       WHERE run_id = ? AND loop_id = ?
+       ORDER BY reviewed_at DESC
+       LIMIT 1`
+    )
+    .get(runId, loopId) as
+    | {
+        id: string;
+        passed: number;
+        interpreted_intent: string | null;
+        intent_satisfied: number | null;
+      }
+    | undefined;
+
+  if (!review) {
+    return { reviewId: null, passed: false, issues: [] };
+  }
+
+  // Load issues for this loop review
+  const issueRows = db
+    .prepare(
+      `SELECT task_id, file, line, type, description, suggestion
+       FROM review_issues
+       WHERE loop_review_id = ?`
+    )
+    .all(review.id) as Array<{
+    task_id: string;
+    file: string;
+    line: number | null;
+    type: ReviewIssueType;
+    description: string;
+    suggestion: string;
+  }>;
+
+  const issues: ReviewIssue[] = issueRows.map((row) => ({
+    taskId: row.task_id,
+    file: row.file,
+    line: row.line ?? undefined,
+    type: row.type,
+    description: row.description,
+    suggestion: row.suggestion,
+  }));
+
+  return {
+    reviewId: review.id,
+    passed: review.passed === 1,
+    issues,
+    interpretedIntent: review.interpreted_intent ?? undefined,
+    intentSatisfied: review.intent_satisfied != null ? review.intent_satisfied === 1 : undefined,
+  };
+}
+
+/**
+ * Generate the review prompt for a specific loop.
+ */
+export function getLoopReviewPrompt(
+  loop: LoopState,
+  task: Task,
+  otherLoopsSummary: string,
+  depth: EffortConfig['reviewDepth']
+): string {
+  const intentAnalysis = `
+## Intent Analysis (Do This First)
+
+Before examining implementation details, step back:
+
+1. **What was this task trying to accomplish?** Not just literally, but what goal it serves.
+2. **What would a reasonable user expect?** Error handling, edge cases, consistent patterns.
+3. **Does the implementation serve the goal?** Code can satisfy literal requirements while missing the point.
+
+Write down your interpretation before reviewing code. This prevents rationalization.`;
+
+  const verificationRequirement = `
+## The Iron Law: Evidence Before Claims
+
+**NO REVIEW CLAIMS WITHOUT VERIFICATION EVIDENCE**
+
+Before calling set_loop_review_result, you MUST:
+1. Actually RUN relevant tests and show output
+2. Actually READ the implementation files
+3. Show evidence before making any claim
+
+| Claim | Requires | NOT Sufficient |
+|-------|----------|----------------|
+| "Tests pass" | Test command output | "Should pass", assumption |
+| "Code correct" | Read actual file contents | Task description, memory |
+| "Task satisfied" | Line-by-line check | "Looks complete" |`;
+
+  const qualityChecks = `
+## Quality Checks
+
+- Unnecessary abstractions: classes/functions used only once
+- Missing error handling: unhandled rejections, unchecked operations
+- Pattern violations: code that doesn't match codebase conventions
+- Dead code: unused imports, unreachable branches`;
+
+  const mcpInstructions = `
+## How to Report Results
+
+Use \`set_loop_review_result\` when finished:
+
+\`\`\`
+set_loop_review_result({
+  loopId: "${loop.loopId}",
+  taskId: "${task.id}",
+  passed: true/false,
+  interpretedIntent: "What the task was really trying to accomplish",
+  intentSatisfied: true/false,
+  issues: [{ file, line, type, description, suggestion }]
+})
+\`\`\`
+
+Issue types: over-engineering, missing-error-handling, pattern-violation, dead-code, spec-intent-mismatch`;
+
+  const workingDir = loop.worktreePath
+    ? `This loop's worktree: ${loop.worktreePath}`
+    : 'Working in main repository';
+
+  // Adjust content based on depth
+  let depthContent = '';
+  switch (depth) {
+    case 'shallow':
+      depthContent = `
+Perform a basic review:
+- Do tests pass? (RUN them, show output)
+- Are there obvious bugs?`;
+      break;
+    case 'standard':
+      depthContent = `
+Perform a standard review:
+- Do tests pass? (RUN them, show output)
+- Does the code match the task requirements? (READ files, check each requirement)
+- Are there bugs or edge cases?
+
+${qualityChecks}`;
+      break;
+    case 'deep':
+      depthContent = `
+Perform a comprehensive review:
+- Do tests pass? (RUN them, show output)
+- Does implementation match task? (READ files, verify each requirement)
+- Are edge cases handled?
+- Is error handling adequate?
+
+${qualityChecks}`;
+      break;
+    case 'comprehensive':
+      depthContent = `
+Perform an exhaustive review:
+- Do all tests pass? (RUN full suite, show output)
+- Full task compliance check (READ each file, verify each requirement)
+- Security analysis
+- Performance analysis
+- Edge case coverage
+- Code quality assessment
+
+${qualityChecks}`;
+      break;
+  }
+
+  return `# LOOP REVIEW PHASE
+
+You are reviewing work completed by Loop ${loop.loopId}.
+
+## Task Under Review
+**${task.title}**
+${task.description}
+
+## Other Loops (for context)
+${otherLoopsSummary || 'No other active loops'}
+
+## Working Directory
+${workingDir}
+
+${intentAnalysis}
+${verificationRequirement}
+${depthContent}
+${mcpInstructions}
+
+When done, output: REVIEW_COMPLETE`;
+}
+
+/**
+ * Execute a review for a specific loop after task completion.
+ */
+export async function executeLoopReview(
+  state: OrchestratorState,
+  loop: LoopState,
+  task: Task,
+  otherLoopsSummary: string,
+  onOutput?: (text: string) => void,
+  tracer?: DebugTracer
+): Promise<LoopReviewResult> {
+  const dbPath = join(state.stateDir, 'state.db');
+  const effortConfig = getEffortConfig(state.effort);
+  const model = getModelId(effortConfig.models.review);
+
+  // Use worktree path if available
+  const cwd = loop.worktreePath || process.cwd();
+  const config = createAgentConfig('review', cwd, state.runId, dbPath, model);
+
+  const prompt = `${getLoopReviewPrompt(loop, task, otherLoopsSummary, effortConfig.reviewDepth)}
+
+## Spec:
+File: ${state.specPath}`;
+
+  let fullOutput = '';
+  let costUsd = 0;
+  const startTime = Date.now();
+
+  const writer = tracer?.startAgentCall({
+    phase: 'review',
+    loopId: loop.loopId,
+    prompt,
+  });
+
+  for await (const message of query({
+    prompt,
+    options: {
+      cwd,
+      allowedTools: config.allowedTools,
+      maxTurns: config.maxTurns,
+      model: config.model,
+      includePartialMessages: true,
+      mcpServers: {
+        'sq-db': {
+          command: 'node',
+          args: [MCP_SERVER_PATH, state.runId, dbPath],
+        },
+      },
+    },
+  })) {
+    // Handle tool progress messages
+    if (message.type === 'tool_progress') {
+      const toolName = (message as any).tool_name || 'tool';
+      const elapsed = (message as any).elapsed_time_seconds || 0;
+      const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)\n`;
+      writer?.appendOutput(progressText);
+      onOutput?.(progressText);
+    }
+    // Handle streaming events
+    if (message.type === 'stream_event') {
+      const event = message.event as any;
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        const toolName = event.content_block.name || 'tool';
+        const toolText = `[tool] starting ${toolName}\n`;
+        writer?.appendOutput(toolText);
+        onOutput?.(toolText);
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+        const thinkingText = event.delta.thinking || '';
+        if (thinkingText) {
+          writer?.appendOutput(thinkingText);
+          onOutput?.(`[thinking] ${thinkingText}`);
+        }
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        const textDelta = event.delta.text || '';
+        if (textDelta) {
+          fullOutput += textDelta;
+          writer?.appendOutput(textDelta);
+          onOutput?.(textDelta);
+        }
+      }
+    }
+    if (message.type === 'assistant' && message.message?.content) {
+      for (const block of message.message.content) {
+        if ('text' in block && !fullOutput.includes(block.text)) {
+          fullOutput += block.text;
+          writer?.appendOutput(block.text);
+          onOutput?.(block.text);
+        }
+        if (
+          'type' in block &&
+          block.type === 'thinking' &&
+          'thinking' in block &&
+          typeof block.thinking === 'string'
+        ) {
+          const thinkingText = `[thinking] ${block.thinking}\n`;
+          writer?.appendOutput(thinkingText);
+          onOutput?.(thinkingText);
+        }
+      }
+    }
+    if (message.type === 'result') {
+      costUsd = (message as any).total_cost_usd || 0;
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  await writer?.complete(costUsd, durationMs);
+
+  // Load review result from database
+  const { reviewId, passed, issues, interpretedIntent, intentSatisfied } =
+    loadLoopReviewResultFromDB(state.runId, loop.loopId);
+
+  return {
+    passed,
+    issues,
+    costUsd,
+    reviewId: reviewId || '',
     interpretedIntent,
     intentSatisfied,
   };

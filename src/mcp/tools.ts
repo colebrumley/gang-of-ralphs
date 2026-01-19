@@ -74,6 +74,40 @@ export const SetReviewResultSchema = z.object({
   issues: z.array(ReviewIssueSchema).default([]).describe('Structured review issues found'),
 });
 
+export const LoopReviewIssueSchema = z.object({
+  file: z.string().describe('File path where the issue was found'),
+  line: z.number().optional().describe('Line number of the issue'),
+  type: z
+    .enum([
+      'over-engineering',
+      'missing-error-handling',
+      'pattern-violation',
+      'dead-code',
+      'spec-intent-mismatch',
+    ])
+    .describe('Type of issue'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('Suggested fix'),
+});
+
+export const SetLoopReviewResultSchema = z.object({
+  loopId: z.string().describe('The loop being reviewed'),
+  taskId: z
+    .string()
+    .optional()
+    .describe('The task that was reviewed (optional for checkpoint reviews)'),
+  passed: z.boolean().describe('Whether review passed'),
+  interpretedIntent: z
+    .string()
+    .optional()
+    .describe('What the task was really trying to accomplish'),
+  intentSatisfied: z
+    .boolean()
+    .optional()
+    .describe('Does the implementation serve the interpreted intent?'),
+  issues: z.array(LoopReviewIssueSchema).default([]).describe('Structured review issues found'),
+});
+
 export const CreateLoopSchema = z.object({
   taskIds: z.array(z.string()).describe('Task IDs to assign to this loop'),
   maxIterations: z.number().describe('Maximum iterations before stopping'),
@@ -108,6 +142,8 @@ export type RecordCost = z.infer<typeof RecordCostSchema>;
 export type AddContext = z.infer<typeof AddContextSchema>;
 export type ReviewIssueMCP = z.infer<typeof ReviewIssueSchema>;
 export type SetReviewResult = z.infer<typeof SetReviewResultSchema>;
+export type LoopReviewIssue = z.infer<typeof LoopReviewIssueSchema>;
+export type SetLoopReviewResult = z.infer<typeof SetLoopReviewResultSchema>;
 export type CreateLoop = z.infer<typeof CreateLoopSchema>;
 export type PersistLoopState = z.infer<typeof PersistLoopStateSchema>;
 export type RecordPhaseCost = z.infer<typeof RecordPhaseCostSchema>;

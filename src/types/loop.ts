@@ -6,6 +6,8 @@ export interface StuckIndicators {
   lastActivityAt: number; // Unix timestamp (ms) of last output received
 }
 
+export type LoopReviewStatus = 'pending' | 'in_progress' | 'passed' | 'failed';
+
 export interface LoopState {
   loopId: string;
   taskIds: string[];
@@ -18,4 +20,10 @@ export interface LoopState {
   output: string[]; // Recent output lines for TUI
   worktreePath: string | null; // Path to git worktree (null if not using worktrees)
   phase: string; // Phase that created this loop (typically 'build')
+
+  // Per-loop review tracking
+  reviewStatus: LoopReviewStatus;
+  lastReviewId: string | null; // References loop_reviews.id
+  revisionAttempts: number; // Count of revision attempts for current task
+  lastCheckpointReviewAt: number; // Iteration when last checkpoint review occurred
 }

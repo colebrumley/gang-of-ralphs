@@ -20,6 +20,7 @@ import type {
   Task,
   TaskGraph,
 } from '../../types/index.js';
+import { executeLoopReview } from './review.js';
 
 export function buildPromptWithFeedback(
   task: Task,
@@ -333,32 +334,109 @@ export async function executeBuildIteration(
 
       // Check for completion signal
       if (output.includes('TASK_COMPLETE')) {
-        // Merge worktree if using worktrees
-        const worktreeManager = loopManager.getWorktreeManager();
-        if (loop.worktreePath && worktreeManager) {
-          const mergeResult = await worktreeManager.merge(loop.loopId);
+        // Run per-loop review before considering task complete
+        loopManager.updateReviewStatus(loop.loopId, 'in_progress');
+        const otherLoopsSummary = loopManager.getOtherLoopsSummary(loop.loopId, state.tasks);
 
-          if (mergeResult.status === 'conflict') {
-            // Return conflict info for orchestrator to handle in conflict phase
-            return {
-              loopId: loop.loopId,
-              taskId: task.id,
-              completed: false,
-              costUsd,
-              conflict: {
+        const reviewResult = await executeLoopReview(
+          state,
+          loop,
+          task,
+          otherLoopsSummary,
+          onLoopOutput ? (text) => onLoopOutput(loop.loopId, `[review] ${text}`) : undefined,
+          tracer
+        );
+
+        // Add review cost to loop cost
+        costUsd += reviewResult.costUsd;
+
+        if (reviewResult.passed) {
+          // Review passed - reset revision attempts and proceed
+          loopManager.updateReviewStatus(loop.loopId, 'passed', reviewResult.reviewId);
+          loopManager.resetRevisionAttempts(loop.loopId);
+
+          // Merge worktree if using worktrees
+          const worktreeManager = loopManager.getWorktreeManager();
+          if (loop.worktreePath && worktreeManager) {
+            const mergeResult = await worktreeManager.merge(loop.loopId);
+
+            if (mergeResult.status === 'conflict') {
+              // Return conflict info for orchestrator to handle in conflict phase
+              return {
                 loopId: loop.loopId,
                 taskId: task.id,
-                conflictFiles: mergeResult.conflictFiles,
-              },
-            };
+                completed: false,
+                costUsd,
+                conflict: {
+                  loopId: loop.loopId,
+                  taskId: task.id,
+                  conflictFiles: mergeResult.conflictFiles,
+                },
+              };
+            }
+
+            // Cleanup worktree on successful merge
+            await worktreeManager.cleanup(loop.loopId);
           }
 
-          // Cleanup worktree on successful merge
-          await worktreeManager.cleanup(loop.loopId);
+          loopManager.updateLoopStatus(loop.loopId, 'completed');
+          return { loopId: loop.loopId, taskId: task.id, completed: true, costUsd };
         }
 
-        loopManager.updateLoopStatus(loop.loopId, 'completed');
-        return { loopId: loop.loopId, taskId: task.id, completed: true, costUsd };
+        // Review failed - check if we've exceeded max revision attempts
+        loopManager.updateReviewStatus(loop.loopId, 'failed', reviewResult.reviewId);
+        loopManager.incrementRevisionAttempts(loop.loopId);
+
+        if (loopManager.hasExceededMaxRevisions(loop.loopId, effortConfig.maxRevisionAttempts)) {
+          // Exceeded max revisions - mark loop as stuck
+          loopManager.updateLoopStatus(loop.loopId, 'stuck');
+          loop.stuckIndicators.lastError = `Review failed after ${effortConfig.maxRevisionAttempts} revision attempts`;
+          tracer?.logError(
+            `Loop ${loop.loopId} exceeded max revision attempts (${effortConfig.maxRevisionAttempts})`,
+            'build'
+          );
+          return {
+            loopId: loop.loopId,
+            taskId: task.id,
+            completed: false,
+            costUsd,
+            reviewFailed: true,
+            exceededMaxRevisions: true,
+          };
+        }
+
+        // Store review issues as feedback for next iteration
+        // The issues will be picked up by buildPromptWithFeedback on next iteration
+        for (const issue of reviewResult.issues) {
+          if (!state.context.reviewIssues) {
+            state.context.reviewIssues = [];
+          }
+          // Avoid duplicates
+          const exists = state.context.reviewIssues.some(
+            (i) =>
+              i.taskId === issue.taskId &&
+              i.file === issue.file &&
+              i.description === issue.description
+          );
+          if (!exists) {
+            state.context.reviewIssues.push(issue);
+          }
+        }
+
+        tracer?.logError(
+          `Loop ${loop.loopId} review failed (attempt ${loop.revisionAttempts}/${effortConfig.maxRevisionAttempts}): ${reviewResult.issues.length} issues`,
+          'build'
+        );
+
+        // Don't mark as completed - loop will continue with feedback
+        return {
+          loopId: loop.loopId,
+          taskId: task.id,
+          completed: false,
+          costUsd,
+          reviewFailed: true,
+          reviewIssues: reviewResult.issues,
+        };
       }
 
       // Check for stuck signal
@@ -421,19 +499,25 @@ export async function executeBuildIteration(
     };
   }
 
-  // Check if any loop needs review
+  // Check if any loop needs review (legacy interval-based review)
   const needsReview = loopManager
     .getActiveLoops()
     .some((loop) => loopManager.needsReview(loop.loopId));
 
-  // Check if any loop hit idle timeout
+  // Check if any loop hit idle timeout or exceeded max revisions
   const hadIdleTimeout = results.some((r) => 'idleTimeout' in r && r.idleTimeout);
+  const hadExceededMaxRevisions = results.some(
+    (r) => 'exceededMaxRevisions' in r && r.exceededMaxRevisions
+  );
+
+  // A loop is stuck if it hit idle timeout OR exceeded max revisions
+  const isStuck = hadIdleTimeout || hadExceededMaxRevisions;
 
   return {
     completedTasks: [...state.completedTasks, ...newlyCompleted],
     activeLoops: loopManager.getAllLoops(),
     needsReview,
-    stuck: hadIdleTimeout,
+    stuck: isStuck,
     loopCosts,
   };
 }

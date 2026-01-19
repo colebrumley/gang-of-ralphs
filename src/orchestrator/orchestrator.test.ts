@@ -73,6 +73,10 @@ function createTestLoop(overrides: Partial<LoopState> = {}): LoopState {
     output: [],
     worktreePath: null,
     phase: 'build',
+    reviewStatus: 'pending',
+    lastReviewId: null,
+    revisionAttempts: 0,
+    lastCheckpointReviewAt: 0,
     ...overrides,
   };
 }
