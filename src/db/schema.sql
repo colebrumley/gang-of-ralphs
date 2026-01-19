@@ -16,8 +16,7 @@ CREATE TABLE IF NOT EXISTS runs (
   use_worktrees INTEGER NOT NULL DEFAULT 1,
   interpreted_intent TEXT,
   intent_satisfied INTEGER,
-  was_empty_project INTEGER,  -- NULL means not yet checked, 0 = false, 1 = true
-  codebase_analysis TEXT  -- JSON serialized CodebaseAnalysis
+  was_empty_project INTEGER  -- NULL means not yet checked, 0 = false, 1 = true
 );
 
 -- Tasks table: enumerated tasks for a run
@@ -74,29 +73,42 @@ CREATE TABLE IF NOT EXISTS phase_history (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Context: discoveries, errors, decisions
-CREATE TABLE IF NOT EXISTS context_entries (
+-- Context: unified storage for all context types
+CREATE TABLE IF NOT EXISTS context (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   run_id TEXT NOT NULL REFERENCES runs(id),
-  entry_type TEXT NOT NULL CHECK (entry_type IN ('discovery', 'error', 'decision')),
+  type TEXT NOT NULL CHECK (type IN ('discovery', 'error', 'decision', 'review_issue', 'scratchpad', 'codebase_analysis')),
   content TEXT NOT NULL,
+  task_id TEXT,
+  loop_id TEXT,
+  file TEXT,
+  line INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Review issues: structured feedback from review phase
-CREATE TABLE IF NOT EXISTS review_issues (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id TEXT NOT NULL REFERENCES runs(id),
-  task_id TEXT NOT NULL,
-  file TEXT NOT NULL,
-  line INTEGER,
-  type TEXT NOT NULL CHECK (type IN ('over-engineering', 'missing-error-handling', 'pattern-violation', 'dead-code', 'spec-intent-mismatch')),
-  description TEXT NOT NULL,
-  suggestion TEXT NOT NULL,
-  loop_id TEXT,                           -- which loop produced this issue (null for run-level reviews)
-  loop_review_id TEXT,                    -- references loop_reviews.id
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+-- Indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_context_run ON context(run_id);
+CREATE INDEX IF NOT EXISTS idx_context_type ON context(run_id, type);
+CREATE INDEX IF NOT EXISTS idx_context_task ON context(run_id, task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_context_loop ON context(run_id, loop_id) WHERE loop_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_context_file ON context(run_id, file) WHERE file IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_context_created ON context(run_id, created_at DESC);
+
+-- FTS5 for full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(
+  content,
+  content='context',
+  content_rowid='id'
 );
+
+-- Keep FTS in sync with main table
+CREATE TRIGGER IF NOT EXISTS context_fts_insert AFTER INSERT ON context BEGIN
+  INSERT INTO context_fts(rowid, content) VALUES (new.id, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS context_fts_delete AFTER DELETE ON context BEGIN
+  INSERT INTO context_fts(context_fts, rowid, content) VALUES ('delete', old.id, old.content);
+END;
 
 -- Loop reviews: per-loop review results
 CREATE TABLE IF NOT EXISTS loop_reviews (
@@ -133,8 +145,6 @@ CREATE TABLE IF NOT EXISTS pending_conflicts (
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(run_id);
 CREATE INDEX IF NOT EXISTS idx_loops_run ON loops(run_id);
 CREATE INDEX IF NOT EXISTS idx_phase_history_run ON phase_history(run_id);
-CREATE INDEX IF NOT EXISTS idx_review_issues_run ON review_issues(run_id);
-CREATE INDEX IF NOT EXISTS idx_review_issues_loop ON review_issues(loop_id);
 CREATE INDEX IF NOT EXISTS idx_phase_costs_run ON phase_costs(run_id);
 CREATE INDEX IF NOT EXISTS idx_loop_reviews_run ON loop_reviews(run_id);
 CREATE INDEX IF NOT EXISTS idx_loop_reviews_loop ON loop_reviews(loop_id);
