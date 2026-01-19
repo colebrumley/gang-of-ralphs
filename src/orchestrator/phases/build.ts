@@ -355,6 +355,11 @@ export async function executeBuildIteration(
           loopManager.updateReviewStatus(loop.loopId, 'passed', reviewResult.reviewId);
           loopManager.resetRevisionAttempts(loop.loopId);
 
+          // Clear any stale review issues for this task since it completed successfully
+          state.context.reviewIssues = (state.context.reviewIssues || []).filter(
+            (i) => i.taskId !== task.id
+          );
+
           // Merge worktree if using worktrees
           const worktreeManager = loopManager.getWorktreeManager();
           if (loop.worktreePath && worktreeManager) {
@@ -405,22 +410,14 @@ export async function executeBuildIteration(
           };
         }
 
-        // Store review issues as feedback for next iteration
-        // The issues will be picked up by buildPromptWithFeedback on next iteration
+        // Replace review issues for this task with fresh issues from this review
+        // Clear existing issues for this task first to prevent stale feedback accumulation
+        state.context.reviewIssues = (state.context.reviewIssues || []).filter(
+          (i) => i.taskId !== task.id
+        );
+        // Add the new issues from this review
         for (const issue of reviewResult.issues) {
-          if (!state.context.reviewIssues) {
-            state.context.reviewIssues = [];
-          }
-          // Avoid duplicates
-          const exists = state.context.reviewIssues.some(
-            (i) =>
-              i.taskId === issue.taskId &&
-              i.file === issue.file &&
-              i.description === issue.description
-          );
-          if (!exists) {
-            state.context.reviewIssues.push(issue);
-          }
+          state.context.reviewIssues.push(issue);
         }
 
         tracer?.logError(
