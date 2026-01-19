@@ -141,11 +141,36 @@ export function saveRun(state: OrchestratorState): void {
     );
   }
 
+  // Persist task status to database
+  saveTasks(state);
+
   // Persist loops to database
   saveLoops(state);
 
   // Persist phase history to database
   savePhaseHistory(state);
+}
+
+/**
+ * Persist task statuses to the database.
+ * Updates tasks in completedTasks to have status 'completed'.
+ * Also syncs failed task status from state.tasks array.
+ */
+function saveTasks(state: OrchestratorState): void {
+  const db = getDatabase();
+
+  const completedSet = new Set(state.completedTasks);
+
+  // Update all tasks, preferring completedTasks status over state.tasks status
+  const stmt = db.prepare(`
+    UPDATE tasks SET status = ?, assigned_loop_id = ? WHERE id = ? AND run_id = ?
+  `);
+
+  for (const task of state.tasks) {
+    // Use 'completed' if in completedTasks, otherwise use task's own status
+    const status = completedSet.has(task.id) ? 'completed' : task.status;
+    stmt.run(status, task.assignedLoopId ?? null, task.id, state.runId);
+  }
 }
 
 /**
