@@ -27,6 +27,7 @@ function createTestState(overrides: Partial<OrchestratorState> = {}): Orchestrat
     costs: {
       totalCostUsd: 0,
       phaseCosts: {
+        analyze: 0,
         enumerate: 0,
         plan: 0,
         build: 0,
@@ -50,6 +51,7 @@ function createTestState(overrides: Partial<OrchestratorState> = {}): Orchestrat
     debug: false,
     pendingConflicts: [],
     wasEmptyProject: null,
+    codebaseAnalysis: null,
     ...overrides,
   };
 }
@@ -199,6 +201,7 @@ describe('Orchestrator', () => {
       return {
         totalCostUsd: 0,
         phaseCosts: {
+          analyze: 0,
           enumerate: 0,
           plan: 0,
           build: 0,
@@ -382,6 +385,7 @@ describe('Orchestrator', () => {
         costs: {
           totalCostUsd: 1.5,
           phaseCosts: {
+            analyze: 0,
             enumerate: 0.2,
             plan: 0.3,
             build: 0.8,
@@ -426,6 +430,7 @@ describe('Orchestrator', () => {
           costs: {
             totalCostUsd: 15, // Exceeds perRunMaxUsd of 10
             phaseCosts: {
+              analyze: 0,
               enumerate: 0,
               plan: 0,
               build: 15,
@@ -454,6 +459,7 @@ describe('Orchestrator', () => {
           costs: {
             totalCostUsd: 100,
             phaseCosts: {
+              analyze: 0,
               enumerate: 0,
               plan: 0,
               build: 100,
@@ -480,6 +486,7 @@ describe('Orchestrator', () => {
           costs: {
             totalCostUsd: 20,
             phaseCosts: {
+              analyze: 0,
               enumerate: 0,
               plan: 0,
               build: 20,
@@ -514,6 +521,7 @@ describe('Orchestrator', () => {
           costs: {
             totalCostUsd: 50,
             phaseCosts: {
+              analyze: 0,
               enumerate: 0,
               plan: 0,
               build: 50,

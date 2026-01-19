@@ -49,6 +49,7 @@ describe('Dry Run Summary', () => {
       costs: {
         totalCostUsd: 0,
         phaseCosts: {
+          analyze: 0,
           enumerate: 0,
           plan: 0,
           build: 0,
@@ -72,6 +73,7 @@ describe('Dry Run Summary', () => {
       debug: false,
       pendingConflicts: [],
       wasEmptyProject: null,
+      codebaseAnalysis: null,
     };
 
     // Should not throw
@@ -101,6 +103,7 @@ describe('Dry Run Summary', () => {
       costs: {
         totalCostUsd: 0,
         phaseCosts: {
+          analyze: 0,
           enumerate: 0,
           plan: 0,
           build: 0,
@@ -124,6 +127,7 @@ describe('Dry Run Summary', () => {
       debug: false,
       pendingConflicts: [],
       wasEmptyProject: null,
+      codebaseAnalysis: null,
     };
 
     // Should not throw

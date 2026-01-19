@@ -23,7 +23,7 @@ describe('State Management', () => {
       useWorktrees: false, // Disable for testing (may have uncommitted changes)
     });
 
-    assert.strictEqual(state.phase, 'enumerate');
+    assert.strictEqual(state.phase, 'analyze');
     assert.strictEqual(state.effort, 'medium');
     assert.ok(state.runId);
   });
@@ -64,7 +64,7 @@ describe('State Persistence', () => {
     assert.strictEqual(loaded.runId, state.runId);
     assert.strictEqual(loaded.specPath, state.specPath);
     assert.strictEqual(loaded.effort, 'high');
-    assert.strictEqual(loaded.phase, 'enumerate');
+    assert.strictEqual(loaded.phase, 'analyze');
   });
 
   test('loadState returns null when no database exists', () => {

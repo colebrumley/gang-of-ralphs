@@ -436,6 +436,18 @@ export async function executeBuildIteration(
 
             // Cleanup worktree on successful merge
             await worktreeManager.cleanup(loop.loopId);
+          } else {
+            // Not using worktrees - auto-commit changes for this task
+            // This ensures scaffolding and other tasks are properly committed
+            try {
+              const commitMsg = `Complete task: ${task.title}`;
+              await execAsync(
+                `git add -A && git diff --cached --quiet || git commit -m "${commitMsg.replace(/"/g, '\\"')}"`,
+                { cwd: loopCwd }
+              );
+            } catch {
+              // Ignore - may have nothing to commit
+            }
           }
 
           loopManager.updateLoopStatus(loop.loopId, 'completed');

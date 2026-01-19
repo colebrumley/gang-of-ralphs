@@ -80,6 +80,81 @@ export function loadReviewResultFromDB(runId: string): {
 }
 
 /**
+ * Review prompt for ANALYZE phase - reviewing codebase analysis before enumeration.
+ * Checks if analysis is accurate and complete.
+ */
+function getAnalyzeReviewPrompt(depth: EffortConfig['reviewDepth']): string {
+  const mcpInstructions = `
+## How to Report Results
+Use the \`set_review_result\` MCP tool when you finish reviewing.
+
+**Required fields:**
+- \`interpretedIntent\`: What was the analysis supposed to capture?
+- \`intentSatisfied\`: Does the analysis accurately represent the codebase?
+- \`passed\`: Is the analysis complete and accurate?
+- \`issues\`: Array of specific issues found
+
+For a passing review:
+\`\`\`
+set_review_result({
+  interpretedIntent: "Understand the existing codebase structure and features",
+  intentSatisfied: true,
+  passed: true,
+  issues: []
+})
+\`\`\`
+
+For a failing review:
+\`\`\`
+set_review_result({
+  interpretedIntent: "Understand the existing codebase structure and features",
+  intentSatisfied: false,
+  passed: false,
+  issues: [
+    {
+      file: "codebase-analysis",
+      type: "pattern-violation",
+      description: "Analysis missed key authentication system in src/auth/",
+      suggestion: "Include authentication middleware and session management in existingFeatures"
+    }
+  ]
+})
+\`\`\`
+
+Issue types: pattern-violation, missing-error-handling`;
+
+  const baseChecks = `
+**Check for these issues:**
+- Missing features: Are there significant features in the codebase not captured?
+- Inaccurate tech stack: Does the listed tech stack match package.json/config files?
+- Missing entry points: Are the main entry files correctly identified?
+- Pattern gaps: Are coding conventions and architectural patterns captured?`;
+
+  if (depth === 'shallow') {
+    return `# ANALYZE REVIEW (Shallow)
+
+Quick validation of codebase analysis.
+${mcpInstructions}
+${baseChecks}
+
+When done, output: REVIEW_COMPLETE`;
+  }
+
+  return `# ANALYZE REVIEW
+
+Validate the codebase analysis for accuracy and completeness.
+${mcpInstructions}
+${baseChecks}
+
+**Additional checks:**
+- Verify projectType matches the actual project
+- Confirm existingFeatures lists major functionality
+- Check that patterns reflect actual code conventions
+
+When done, output: REVIEW_COMPLETE`;
+}
+
+/**
  * Review prompt for ENUMERATE phase - reviewing tasks before planning.
  * Checks if tasks are well-defined, complete, and aligned with spec intent.
  */
@@ -289,9 +364,13 @@ When done, output: REVIEW_COMPLETE`;
 
 export function getReviewPrompt(
   depth: EffortConfig['reviewDepth'],
-  reviewType: 'enumerate' | 'plan' | 'build'
+  reviewType: 'analyze' | 'enumerate' | 'plan' | 'build'
 ): string {
-  // For enumerate and plan reviews, use specialized prompts
+  // For analyze, enumerate and plan reviews, use specialized prompts
+  // Analyze reviews check the quality of codebase analysis
+  if (reviewType === 'analyze') {
+    return getAnalyzeReviewPrompt(depth);
+  }
   if (reviewType === 'enumerate') {
     return getEnumerateReviewPrompt(depth);
   }

@@ -19,6 +19,7 @@ describe('cost enforcement', () => {
   const defaultCosts: CostTracking = {
     totalCostUsd: 0,
     phaseCosts: {
+      analyze: 0,
       enumerate: 0,
       plan: 0,
       build: 0,
