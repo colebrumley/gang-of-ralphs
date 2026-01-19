@@ -158,6 +158,34 @@ export const WriteScratchpadSchema = z.object({
 
 export type WriteScratchpad = z.infer<typeof WriteScratchpadSchema>;
 
+export const WriteContextSchema = z.object({
+  type: z
+    .enum(['discovery', 'error', 'decision', 'review_issue', 'scratchpad', 'codebase_analysis'])
+    .describe('The type of context being written'),
+  content: z
+    .string()
+    .describe('The content. Plain string for simple types, JSON string for structured types'),
+  task_id: z.string().optional().describe('Associated task ID'),
+  loop_id: z.string().optional().describe('Associated loop ID'),
+  file: z.string().optional().describe('Associated file path'),
+  line: z.number().optional().describe('Associated line number'),
+});
+
+export type WriteContext = z.infer<typeof WriteContextSchema>;
+
+export const ReadContextSchema = z.object({
+  types: z.array(z.string()).optional().describe('Filter by context types'),
+  task_id: z.string().optional().describe('Filter by task ID'),
+  loop_id: z.string().optional().describe('Filter by loop ID'),
+  file: z.string().optional().describe('Filter by file path'),
+  search: z.string().optional().describe('Full-text search query'),
+  limit: z.number().default(500).describe('Max entries to return'),
+  offset: z.number().default(0).describe('Skip first N entries'),
+  order: z.enum(['asc', 'desc']).default('desc').describe('Sort by created_at'),
+});
+
+export type ReadContext = z.infer<typeof ReadContextSchema>;
+
 export type WriteTask = z.infer<typeof WriteTaskSchema>;
 export type CompleteTask = z.infer<typeof CompleteTaskSchema>;
 export type FailTask = z.infer<typeof FailTaskSchema>;

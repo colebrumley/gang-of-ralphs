@@ -7,11 +7,13 @@ import {
   CreateLoopSchema,
   FailTaskSchema,
   PersistLoopStateSchema,
+  ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
   ReviewIssueSchema,
   SetReviewResultSchema,
   UpdateLoopStatusSchema,
+  WriteContextSchema,
   WriteTaskSchema,
 } from './tools.js';
 
@@ -425,6 +427,98 @@ describe('MCP Tool Schemas', () => {
           costUsd: 0.01,
         });
       });
+    });
+  });
+
+  describe('WriteContextSchema', () => {
+    test('accepts valid discovery context', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'discovery',
+        content: 'Found existing auth middleware',
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts review_issue with all fields', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'review_issue',
+        content: JSON.stringify({
+          issue_type: 'dead-code',
+          description: 'Unused',
+          suggestion: 'Remove',
+        }),
+        task_id: 'task-1',
+        file: 'src/foo.ts',
+        line: 42,
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts scratchpad with loop_id', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'scratchpad',
+        content: JSON.stringify({ iteration: 1, done: false }),
+        loop_id: 'loop-1',
+      });
+      assert.ok(result.success);
+    });
+
+    test('rejects invalid type', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'invalid',
+        content: 'test',
+      });
+      assert.ok(!result.success);
+    });
+
+    test('rejects missing content', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'discovery',
+      });
+      assert.ok(!result.success);
+    });
+  });
+
+  describe('ReadContextSchema', () => {
+    test('accepts empty object (all optional)', () => {
+      const result = ReadContextSchema.safeParse({});
+      assert.ok(result.success);
+    });
+
+    test('accepts types array', () => {
+      const result = ReadContextSchema.safeParse({
+        types: ['discovery', 'error'],
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts all filter options', () => {
+      const result = ReadContextSchema.safeParse({
+        types: ['review_issue'],
+        task_id: 'task-1',
+        loop_id: 'loop-1',
+        file: 'src/foo.ts',
+        search: 'authentication',
+        limit: 100,
+        offset: 10,
+        order: 'asc',
+      });
+      assert.ok(result.success);
+    });
+
+    test('defaults limit to 500', () => {
+      const result = ReadContextSchema.parse({});
+      assert.strictEqual(result.limit, 500);
+    });
+
+    test('defaults order to desc', () => {
+      const result = ReadContextSchema.parse({});
+      assert.strictEqual(result.order, 'desc');
+    });
+
+    test('rejects invalid order', () => {
+      const result = ReadContextSchema.safeParse({ order: 'invalid' });
+      assert.ok(!result.success);
     });
   });
 });
