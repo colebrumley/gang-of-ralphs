@@ -5,6 +5,7 @@ import type { DebugTracer, StateSnapshotEvent } from '../debug/index.js';
 import { LoopManager } from '../loops/manager.js';
 import type { CostTracking, LoopState, OrchestratorState, Phase } from '../types/index.js';
 import { WorktreeManager } from '../worktrees/manager.js';
+import { executeAnalyze } from './phases/analyze.js';
 import { executeBuildIteration, getNextParallelGroup } from './phases/build.js';
 import { resolveConflict } from './phases/conflict.js';
 import { executeEnumerate } from './phases/enumerate.js';
@@ -100,6 +101,38 @@ export async function runOrchestrator(
 
   try {
     switch (state.phase) {
+      case 'analyze': {
+        const result = await executeAnalyze(state, callbacks.onOutput, callbacks.tracer);
+        state.codebaseAnalysis = result.analysis;
+        state.wasEmptyProject = result.wasEmptyProject;
+        updateCosts(state.costs, 'analyze', result.costUsd);
+        state.phaseHistory.push({
+          phase: 'analyze',
+          success: true,
+          timestamp: new Date().toISOString(),
+          summary: result.wasEmptyProject
+            ? 'Empty project detected'
+            : `Analyzed codebase: ${result.analysis.projectType}`,
+          costUsd: result.costUsd,
+        });
+
+        // Check if we need to review
+        if (effortConfig.reviewAfterAnalyze) {
+          callbacks.tracer?.logDecision(
+            'review_trigger',
+            { phase: 'analyze', effortLevel: state.effort },
+            'review_scheduled',
+            'Effort config requires review after analyze'
+          );
+          state.pendingReview = true;
+          state.reviewType = 'analyze';
+          state.phase = 'review';
+        } else {
+          state.phase = 'enumerate';
+        }
+        break;
+      }
+
       case 'enumerate': {
         const result = await executeEnumerate(state, callbacks.onOutput, callbacks.tracer);
         state.tasks = result.tasks;
@@ -257,6 +290,9 @@ export async function runOrchestrator(
 
           // Determine next phase based on what we reviewed
           switch (state.reviewType) {
+            case 'analyze':
+              state.phase = 'enumerate';
+              break;
             case 'enumerate':
               state.phase = 'plan';
               break;
