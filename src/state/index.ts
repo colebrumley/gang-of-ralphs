@@ -4,6 +4,20 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getEffortConfig } from '../config/effort.js';
 import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
+
+/**
+ * Maximum number of context entries to keep per type (discovery, error, decision).
+ * Prevents unbounded memory growth in long-running orchestration sessions.
+ * Older entries beyond this limit are pruned from the database.
+ */
+export const MAX_CONTEXT_ENTRIES_PER_TYPE = 500;
+
+/**
+ * Maximum number of review issues to keep in memory.
+ * Older issues beyond this limit are pruned from the database.
+ */
+export const MAX_REVIEW_ISSUES = 500;
+
 import type {
   EffortLevel,
   LoopReviewStatus,
@@ -245,6 +259,41 @@ function saveLoops(state: OrchestratorState): void {
   }
 }
 
+/**
+ * Prune old context entries from the database to prevent unbounded storage growth.
+ * Keeps only the most recent MAX_CONTEXT_ENTRIES_PER_TYPE entries per type.
+ */
+function pruneContextEntries(db: ReturnType<typeof getDatabase>, runId: string): void {
+  for (const entryType of ['discovery', 'error', 'decision']) {
+    // Delete entries older than the Nth most recent entry for this type
+    db.prepare(`
+      DELETE FROM context_entries
+      WHERE run_id = ? AND entry_type = ? AND id NOT IN (
+        SELECT id FROM context_entries
+        WHERE run_id = ? AND entry_type = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      )
+    `).run(runId, entryType, runId, entryType, MAX_CONTEXT_ENTRIES_PER_TYPE);
+  }
+}
+
+/**
+ * Prune old review issues from the database to prevent unbounded storage growth.
+ * Keeps only the most recent MAX_REVIEW_ISSUES entries.
+ */
+function pruneReviewIssues(db: ReturnType<typeof getDatabase>, runId: string): void {
+  db.prepare(`
+    DELETE FROM review_issues
+    WHERE run_id = ? AND id NOT IN (
+      SELECT id FROM review_issues
+      WHERE run_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    )
+  `).run(runId, runId, MAX_REVIEW_ISSUES);
+}
+
 export function loadState(stateDir: string): OrchestratorState | null {
   const dbPath = join(stateDir, 'state.db');
   if (!existsSync(dbPath)) {
@@ -430,31 +479,40 @@ export function loadState(stateDir: string): OrchestratorState | null {
     costUsd: row.cost_usd ?? 0,
   }));
 
-  // Load context entries
-  const contextRows = db
-    .prepare(`
-    SELECT * FROM context_entries WHERE run_id = ?
-  `)
-    .all(run.id) as Array<{
-    entry_type: 'discovery' | 'error' | 'decision';
-    content: string;
-  }>;
+  // Load context entries with limits to prevent unbounded memory growth
+  // Load only the most recent entries per type, ordered oldest-first for chronological display
+  const loadContextEntries = (entryType: string): string[] => {
+    const rows = db
+      .prepare(`
+        SELECT content FROM (
+          SELECT content, created_at FROM context_entries
+          WHERE run_id = ? AND entry_type = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        ) ORDER BY created_at ASC
+      `)
+      .all(run.id, entryType, MAX_CONTEXT_ENTRIES_PER_TYPE) as Array<{ content: string }>;
+    return rows.map((row) => row.content);
+  };
 
-  const discoveries: string[] = [];
-  const errors: string[] = [];
-  const decisions: string[] = [];
-  for (const row of contextRows) {
-    if (row.entry_type === 'discovery') discoveries.push(row.content);
-    else if (row.entry_type === 'error') errors.push(row.content);
-    else if (row.entry_type === 'decision') decisions.push(row.content);
-  }
+  const discoveries = loadContextEntries('discovery');
+  const errors = loadContextEntries('error');
+  const decisions = loadContextEntries('decision');
 
-  // Load review issues
+  // Prune old context entries from database to prevent unbounded storage growth
+  pruneContextEntries(db, run.id);
+
+  // Load review issues with limit to prevent unbounded memory growth
+  // Most recent issues are most relevant, so load newest first then reverse for chronological order
   const reviewIssueRows = db
     .prepare(`
-    SELECT * FROM review_issues WHERE run_id = ?
+    SELECT * FROM (
+      SELECT * FROM review_issues WHERE run_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    ) ORDER BY created_at ASC
   `)
-    .all(run.id) as Array<{
+    .all(run.id, MAX_REVIEW_ISSUES) as Array<{
     task_id: string;
     file: string;
     line: number | null;
@@ -471,6 +529,9 @@ export function loadState(stateDir: string): OrchestratorState | null {
     description: row.description,
     suggestion: row.suggestion,
   }));
+
+  // Prune old review issues from database to prevent unbounded storage growth
+  pruneReviewIssues(db, run.id);
 
   // Get completed task IDs
   const completedTasks = tasks.filter((t) => t.status === 'completed').map((t) => t.id);

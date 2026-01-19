@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
-import { initializeState, loadState, saveRun } from './index.js';
+import {
+  MAX_CONTEXT_ENTRIES_PER_TYPE,
+  MAX_REVIEW_ISSUES,
+  initializeState,
+  loadState,
+  saveRun,
+} from './index.js';
 
 describe('State Management', () => {
   test('initializeState creates valid initial state', async () => {
@@ -663,5 +669,256 @@ describe('State Persistence', () => {
     assert.strictEqual(loop.lastReviewId, 'r3');
     // Most recent passed, so revisionAttempts should be 0
     assert.strictEqual(loop.revisionAttempts, 0);
+  });
+
+  test('loadState limits context entries to MAX_CONTEXT_ENTRIES_PER_TYPE', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert more entries than the limit for each type
+    const db = getDatabase();
+    const insertStmt = db.prepare(`
+      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      VALUES (?, ?, ?, datetime('now', ? || ' seconds'))
+    `);
+
+    const numEntries = MAX_CONTEXT_ENTRIES_PER_TYPE + 10;
+    for (let i = 0; i < numEntries; i++) {
+      insertStmt.run(state.runId, 'discovery', `Discovery ${i}`, i.toString());
+      insertStmt.run(state.runId, 'error', `Error ${i}`, i.toString());
+      insertStmt.run(state.runId, 'decision', `Decision ${i}`, i.toString());
+    }
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    // Should only load the limit
+    assert.strictEqual(loaded.context.discoveries.length, MAX_CONTEXT_ENTRIES_PER_TYPE);
+    assert.strictEqual(loaded.context.errors.length, MAX_CONTEXT_ENTRIES_PER_TYPE);
+    assert.strictEqual(loaded.context.decisions.length, MAX_CONTEXT_ENTRIES_PER_TYPE);
+
+    // Should load the most recent entries (highest numbered)
+    // First entry should be the 11th (index 10) since we skip the first 10
+    assert.strictEqual(loaded.context.discoveries[0], 'Discovery 10');
+    assert.strictEqual(loaded.context.errors[0], 'Error 10');
+    assert.strictEqual(loaded.context.decisions[0], 'Decision 10');
+
+    // Last entry should be the most recent
+    assert.strictEqual(
+      loaded.context.discoveries[MAX_CONTEXT_ENTRIES_PER_TYPE - 1],
+      `Discovery ${numEntries - 1}`
+    );
+  });
+
+  test('loadState prunes old context entries from database', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert more entries than the limit
+    const db = getDatabase();
+    const insertStmt = db.prepare(`
+      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      VALUES (?, ?, ?, datetime('now', ? || ' seconds'))
+    `);
+
+    const numEntries = MAX_CONTEXT_ENTRIES_PER_TYPE + 50;
+    for (let i = 0; i < numEntries; i++) {
+      insertStmt.run(state.runId, 'discovery', `Discovery ${i}`, i.toString());
+    }
+
+    // Verify we have more than the limit before loading
+    const countBefore = db
+      .prepare(
+        "SELECT COUNT(*) as count FROM context_entries WHERE run_id = ? AND entry_type = 'discovery'"
+      )
+      .get(state.runId) as { count: number };
+    assert.strictEqual(countBefore.count, numEntries);
+
+    closeDatabase();
+
+    // loadState should prune old entries
+    const loaded = loadState(tempDir);
+    assert.ok(loaded);
+
+    // Verify database now has only the limit
+    const dbAfter = getDatabase();
+    const countAfter = dbAfter
+      .prepare(
+        "SELECT COUNT(*) as count FROM context_entries WHERE run_id = ? AND entry_type = 'discovery'"
+      )
+      .get(state.runId) as { count: number };
+    assert.strictEqual(countAfter.count, MAX_CONTEXT_ENTRIES_PER_TYPE);
+  });
+
+  test('loadState limits review issues to MAX_REVIEW_ISSUES', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert more issues than the limit
+    const db = getDatabase();
+    const insertStmt = db.prepare(`
+      INSERT INTO review_issues (run_id, task_id, file, type, description, suggestion, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
+    `);
+
+    const numIssues = MAX_REVIEW_ISSUES + 20;
+    for (let i = 0; i < numIssues; i++) {
+      insertStmt.run(
+        state.runId,
+        `task-${i}`,
+        `src/file${i}.ts`,
+        'over-engineering',
+        `Issue ${i}`,
+        `Fix ${i}`,
+        i.toString()
+      );
+    }
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    // Should only load the limit
+    assert.strictEqual(loaded.context.reviewIssues.length, MAX_REVIEW_ISSUES);
+
+    // Should load the most recent issues (highest numbered)
+    // First issue should be the 21st (index 20) since we skip the first 20
+    assert.strictEqual(loaded.context.reviewIssues[0].description, 'Issue 20');
+
+    // Last issue should be the most recent
+    assert.strictEqual(
+      loaded.context.reviewIssues[MAX_REVIEW_ISSUES - 1].description,
+      `Issue ${numIssues - 1}`
+    );
+  });
+
+  test('loadState prunes old review issues from database', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert more issues than the limit
+    const db = getDatabase();
+    const insertStmt = db.prepare(`
+      INSERT INTO review_issues (run_id, task_id, file, type, description, suggestion, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
+    `);
+
+    const numIssues = MAX_REVIEW_ISSUES + 30;
+    for (let i = 0; i < numIssues; i++) {
+      insertStmt.run(
+        state.runId,
+        `task-${i}`,
+        `src/file${i}.ts`,
+        'dead-code',
+        `Issue ${i}`,
+        `Fix ${i}`,
+        i.toString()
+      );
+    }
+
+    // Verify we have more than the limit before loading
+    const countBefore = db
+      .prepare('SELECT COUNT(*) as count FROM review_issues WHERE run_id = ?')
+      .get(state.runId) as { count: number };
+    assert.strictEqual(countBefore.count, numIssues);
+
+    closeDatabase();
+
+    // loadState should prune old issues
+    const loaded = loadState(tempDir);
+    assert.ok(loaded);
+
+    // Verify database now has only the limit
+    const dbAfter = getDatabase();
+    const countAfter = dbAfter
+      .prepare('SELECT COUNT(*) as count FROM review_issues WHERE run_id = ?')
+      .get(state.runId) as { count: number };
+    assert.strictEqual(countAfter.count, MAX_REVIEW_ISSUES);
+  });
+
+  test('context entry limits preserve chronological order', () => {
+    const dbPath = join(tempDir, 'state.db');
+    createDatabase(dbPath);
+
+    const state = initializeState({
+      specPath: '/path/to/spec.md',
+      effort: 'medium',
+      stateDir: tempDir,
+      maxLoops: 4,
+      maxIterations: 20,
+      useWorktrees: false,
+    });
+
+    saveRun(state);
+
+    // Insert entries with specific timestamps
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(state.runId, 'discovery', 'Oldest discovery', '2024-01-01 10:00:00');
+    db.prepare(`
+      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(state.runId, 'discovery', 'Middle discovery', '2024-01-01 11:00:00');
+    db.prepare(`
+      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(state.runId, 'discovery', 'Newest discovery', '2024-01-01 12:00:00');
+
+    closeDatabase();
+    const loaded = loadState(tempDir);
+
+    assert.ok(loaded);
+    assert.strictEqual(loaded.context.discoveries.length, 3);
+    // Should be in chronological order (oldest first)
+    assert.strictEqual(loaded.context.discoveries[0], 'Oldest discovery');
+    assert.strictEqual(loaded.context.discoveries[1], 'Middle discovery');
+    assert.strictEqual(loaded.context.discoveries[2], 'Newest discovery');
   });
 });
