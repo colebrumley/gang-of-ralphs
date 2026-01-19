@@ -74,9 +74,24 @@ ${tasksJson}`;
       },
     },
   })) {
+    // Handle tool progress messages to show activity during tool execution
+    if (message.type === 'tool_progress') {
+      const toolName = (message as any).tool_name || 'tool';
+      const elapsed = (message as any).elapsed_time_seconds || 0;
+      const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)\n`;
+      writer?.appendOutput(progressText);
+      onOutput?.(progressText);
+    }
     // Handle streaming events for real-time thinking output
     if (message.type === 'stream_event') {
       const event = message.event as any;
+      // Handle tool_use content block start to show when a tool begins
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        const toolName = event.content_block.name || 'tool';
+        const toolText = `[tool] starting ${toolName}\n`;
+        writer?.appendOutput(toolText);
+        onOutput?.(toolText);
+      }
       // Handle thinking delta events
       if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
         const thinkingText = event.delta.thinking || '';

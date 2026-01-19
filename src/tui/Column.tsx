@@ -1,6 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
 import { useEffect, useState } from 'react';
 import type { LoopState } from '../types/index.js';
+import { getOutputLineColor, shouldDimOutputLine } from './output-formatting.js';
 
 interface ColumnProps {
   loop: LoopState;
@@ -128,19 +129,16 @@ export function Column({ loop, taskTitle, isFocused = false, totalColumns }: Col
 
       {/* Output */}
       <Box flexDirection="column" paddingX={1} flexGrow={1}>
-        {recentOutput.map((line, i) => {
-          const isThinking = line.startsWith('[thinking]');
-          return (
-            <Text
-              key={i}
-              color={isThinking ? 'magenta' : undefined}
-              dimColor={isThinking}
-              wrap="truncate"
-            >
-              {line.slice(0, outputLimit)}
-            </Text>
-          );
-        })}
+        {recentOutput.map((line, i) => (
+          <Text
+            key={i}
+            color={getOutputLineColor(line)}
+            dimColor={shouldDimOutputLine(line)}
+            wrap="truncate"
+          >
+            {line.slice(0, outputLimit)}
+          </Text>
+        ))}
       </Box>
     </Box>
   );

@@ -229,9 +229,29 @@ export async function executeBuildIteration(
             idleMonitor.recordActivity();
             loopManager.updateLastActivity(loop.loopId);
 
+            // Handle tool progress messages to show activity during tool execution
+            if (message.type === 'tool_progress') {
+              const toolName = (message as any).tool_name || 'tool';
+              const elapsed = (message as any).elapsed_time_seconds || 0;
+              const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)`;
+              writer?.appendOutput(`${progressText}\n`);
+              onLoopOutput?.(loop.loopId, `${progressText}\n`);
+              loopManager.appendOutput(loop.loopId, progressText);
+            }
             // Handle streaming events for real-time thinking output
             if (message.type === 'stream_event') {
               const event = message.event as any;
+              // Handle tool_use content block start to show when a tool begins
+              if (
+                event.type === 'content_block_start' &&
+                event.content_block?.type === 'tool_use'
+              ) {
+                const toolName = event.content_block.name || 'tool';
+                const toolText = `[tool] starting ${toolName}`;
+                writer?.appendOutput(`${toolText}\n`);
+                onLoopOutput?.(loop.loopId, `${toolText}\n`);
+                loopManager.appendOutput(loop.loopId, toolText);
+              }
               // Handle thinking delta events
               if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
                 const thinkingText = event.delta.thinking || '';

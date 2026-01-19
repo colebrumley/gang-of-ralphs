@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink';
 import { useEffect, useState } from 'react';
 import type { Phase } from '../types/index.js';
+import { getOutputLineColor, shouldDimOutputLine } from './output-formatting.js';
 
 interface StatusAreaProps {
   phase: Phase;
@@ -107,13 +108,12 @@ export function StatusArea({
       {output.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           {output.slice(-availableLines).map((line, i) => {
-            const isThinking = line.startsWith('[thinking]');
             const displayLine = line.length > 120 ? `${line.slice(0, 117)}...` : line;
             return (
               <Text
                 key={i}
-                color={isThinking ? 'magenta' : undefined}
-                dimColor={!isThinking}
+                color={getOutputLineColor(line)}
+                dimColor={shouldDimOutputLine(line)}
                 wrap="truncate"
               >
                 {displayLine}
