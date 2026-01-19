@@ -4,6 +4,21 @@ import { BUILD_PROMPT } from '../../agents/prompts.js';
 import type { ReviewIssue, Task, TaskGraph } from '../../types/index.js';
 import { buildPromptWithFeedback, canStartGroup, getNextParallelGroup } from './build.js';
 
+// Helper to simulate the issue replacement logic used in executeBuildIteration
+function replaceIssuesForTask(
+  existingIssues: ReviewIssue[],
+  taskId: string,
+  newIssues: ReviewIssue[]
+): ReviewIssue[] {
+  const filtered = existingIssues.filter((i) => i.taskId !== taskId);
+  return [...filtered, ...newIssues];
+}
+
+// Helper to simulate clearing issues for a completed task
+function clearIssuesForTask(existingIssues: ReviewIssue[], taskId: string): ReviewIssue[] {
+  return existingIssues.filter((i) => i.taskId !== taskId);
+}
+
 describe('Build Phase', () => {
   const tasks: Task[] = [
     {
@@ -179,5 +194,152 @@ describe('Build Phase', () => {
       feedbackIndex > buildPromptEnd,
       'Review feedback must come after static BUILD_PROMPT for cache efficiency'
     );
+  });
+
+  test('replaceIssuesForTask replaces issues instead of accumulating', () => {
+    // Simulate: task t1 had old issues from a previous failed review
+    const oldIssues: ReviewIssue[] = [
+      {
+        taskId: 't1',
+        file: 'src/old.ts',
+        line: 1,
+        type: 'over-engineering',
+        description: 'Old issue that was fixed',
+        suggestion: 'Fix it',
+      },
+      {
+        taskId: 't2', // Different task - should be preserved
+        file: 'src/other.ts',
+        line: 2,
+        type: 'pattern-violation',
+        description: 'Issue for other task',
+        suggestion: 'Keep this',
+      },
+    ];
+
+    // New review finds different issues for t1
+    const newIssues: ReviewIssue[] = [
+      {
+        taskId: 't1',
+        file: 'src/new.ts',
+        line: 10,
+        type: 'missing-error-handling',
+        description: 'New issue found',
+        suggestion: 'Fix new issue',
+      },
+    ];
+
+    const result = replaceIssuesForTask(oldIssues, 't1', newIssues);
+
+    // Should only have the new t1 issue and the preserved t2 issue
+    assert.strictEqual(result.length, 2);
+    assert.ok(
+      result.some((i) => i.taskId === 't2' && i.description === 'Issue for other task'),
+      'Should preserve issues for other tasks'
+    );
+    assert.ok(
+      result.some((i) => i.taskId === 't1' && i.description === 'New issue found'),
+      'Should have new issue for t1'
+    );
+    assert.ok(
+      !result.some((i) => i.description === 'Old issue that was fixed'),
+      'Should NOT have old stale issue for t1'
+    );
+  });
+
+  test('clearIssuesForTask removes all issues for completed task', () => {
+    const issues: ReviewIssue[] = [
+      {
+        taskId: 't1',
+        file: 'src/a.ts',
+        line: 1,
+        type: 'over-engineering',
+        description: 'Issue 1 for t1',
+        suggestion: 'Fix 1',
+      },
+      {
+        taskId: 't1',
+        file: 'src/b.ts',
+        line: 2,
+        type: 'pattern-violation',
+        description: 'Issue 2 for t1',
+        suggestion: 'Fix 2',
+      },
+      {
+        taskId: 't2',
+        file: 'src/c.ts',
+        line: 3,
+        type: 'dead-code',
+        description: 'Issue for t2',
+        suggestion: 'Fix 3',
+      },
+    ];
+
+    // Task t1 completes successfully - clear its issues
+    const result = clearIssuesForTask(issues, 't1');
+
+    // Should only have t2's issue remaining
+    assert.strictEqual(result.length, 1);
+    assert.strictEqual(result[0].taskId, 't2');
+    assert.strictEqual(result[0].description, 'Issue for t2');
+  });
+
+  test('issue accumulation bug scenario - old issues should not leak into new iterations', () => {
+    // Scenario: Task goes through multiple review cycles
+    // Iteration 1: Review fails with issues A, B
+    // Iteration 2: Agent fixes A, B; review fails with issue C (A, B fixed but new issue found)
+    // Expected: Only issue C should be in feedback, not stale A, B
+
+    const task: Task = {
+      id: 't1',
+      title: 'Task 1',
+      description: 'Implement feature',
+      status: 'pending',
+      dependencies: [],
+      estimatedIterations: 5,
+      assignedLoopId: null,
+    };
+
+    // After iteration 1's failed review
+    let reviewIssues: ReviewIssue[] = [
+      {
+        taskId: 't1',
+        file: 'src/index.ts',
+        line: 10,
+        type: 'over-engineering',
+        description: 'Issue A',
+        suggestion: 'Fix A',
+      },
+      {
+        taskId: 't1',
+        file: 'src/index.ts',
+        line: 20,
+        type: 'dead-code',
+        description: 'Issue B',
+        suggestion: 'Fix B',
+      },
+    ];
+
+    // Agent works on fixes... iteration 2's review finds only issue C
+    const iteration2Issues: ReviewIssue[] = [
+      {
+        taskId: 't1',
+        file: 'src/index.ts',
+        line: 30,
+        type: 'pattern-violation',
+        description: 'Issue C',
+        suggestion: 'Fix C',
+      },
+    ];
+
+    // With the fix: replace issues for t1 instead of accumulating
+    reviewIssues = replaceIssuesForTask(reviewIssues, 't1', iteration2Issues);
+
+    // Build prompt should only mention Issue C
+    const prompt = buildPromptWithFeedback(task, reviewIssues, 3, 10);
+
+    assert.ok(prompt.includes('Issue C'), 'Should include current issue C');
+    assert.ok(!prompt.includes('Issue A'), 'Should NOT include stale issue A');
+    assert.ok(!prompt.includes('Issue B'), 'Should NOT include stale issue B');
   });
 });
