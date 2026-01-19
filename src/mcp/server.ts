@@ -714,8 +714,12 @@ ${scratchpad.nextStep}
 ${scratchpad.blockers}
 `;
 
-        writeFileSync(scratchpadPath, content, 'utf-8');
-        result = { content: [{ type: 'text', text: `Scratchpad written to ${scratchpadPath}` }] };
+        try {
+          writeFileSync(scratchpadPath, content, 'utf-8');
+          result = { content: [{ type: 'text', text: `Scratchpad written to ${scratchpadPath}` }] };
+        } catch (e) {
+          result = { content: [{ type: 'text', text: `Failed to write scratchpad: ${e}` }] };
+        }
         break;
       }
 
