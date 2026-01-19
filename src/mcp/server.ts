@@ -316,7 +316,16 @@ export function createMCPServer(runId: string, dbPath: string) {
           properties: {
             phase: {
               type: 'string',
-              enum: ['enumerate', 'plan', 'build', 'review', 'revise', 'conflict', 'complete'],
+              enum: [
+                'analyze',
+                'enumerate',
+                'plan',
+                'build',
+                'review',
+                'revise',
+                'conflict',
+                'complete',
+              ],
               description: 'Phase that incurred this cost',
             },
             costUsd: { type: 'number', description: 'Cost in USD' },
