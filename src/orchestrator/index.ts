@@ -136,7 +136,6 @@ export async function runOrchestrator(
       case 'enumerate': {
         const result = await executeEnumerate(state, callbacks.onOutput, callbacks.tracer);
         state.tasks = result.tasks;
-        state.wasEmptyProject = result.wasEmptyProject; // Persist for PLAN phase to use
         updateCosts(state.costs, 'enumerate', result.costUsd);
         state.phaseHistory.push({
           phase: 'enumerate',

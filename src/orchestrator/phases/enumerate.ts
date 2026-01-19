@@ -122,7 +122,6 @@ export function loadTasksFromDB(runId: string): Task[] {
 export interface EnumerateResult {
   tasks: Task[];
   costUsd: number;
-  wasEmptyProject: boolean;
 }
 
 /**
@@ -271,6 +270,5 @@ ${specContent}`;
   return {
     tasks,
     costUsd,
-    wasEmptyProject: isEmpty,
   };
 }
