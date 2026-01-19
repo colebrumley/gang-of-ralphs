@@ -50,9 +50,17 @@ export function Header({ state, activeLoopCount, lastActivityTime }: HeaderProps
         </Text>
         <Text> | </Text>
         <Text>tasks: </Text>
-        <Text color="magenta">
-          {state.completedTasks.length}/{state.tasks.length}
-        </Text>
+        <Text color="green">{state.tasks.filter((t) => t.status === 'completed').length}✓</Text>
+        <Text> </Text>
+        <Text color="cyan">{state.tasks.filter((t) => t.status === 'in_progress').length}⟳</Text>
+        <Text> </Text>
+        <Text color="gray">{state.tasks.filter((t) => t.status === 'pending').length}○</Text>
+        {state.tasks.some((t) => t.status === 'failed') && (
+          <>
+            <Text> </Text>
+            <Text color="red">{state.tasks.filter((t) => t.status === 'failed').length}✗</Text>
+          </>
+        )}
       </Box>
       <ActivityIndicator lastActivityTime={lastActivityTime} />
     </Box>
