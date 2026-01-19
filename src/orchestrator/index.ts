@@ -311,17 +311,31 @@ export async function runOrchestrator(
           state.context.discoveries.push(`Revision analysis: ${reviseResult.analysis}`);
         }
 
-        // Go back to build phase with context about what to fix
-        state.phase = 'build';
-        state.phaseHistory.push({
-          phase: 'revise',
-          success: reviseResult.success,
-          timestamp: new Date().toISOString(),
-          summary: reviseResult.success
-            ? `Revision ${state.revisionCount} - analyzed ${state.context.reviewIssues.length} issues, returning to build`
-            : `Revision ${state.revisionCount} - analysis incomplete, returning to build`,
-          costUsd: reviseResult.costUsd,
-        });
+        if (reviseResult.success) {
+          // Go back to build phase with context about what to fix
+          state.phase = 'build';
+          state.phaseHistory.push({
+            phase: 'revise',
+            success: true,
+            timestamp: new Date().toISOString(),
+            summary: `Revision ${state.revisionCount} - analyzed ${state.context.reviewIssues.length} issues, returning to build`,
+            costUsd: reviseResult.costUsd,
+          });
+        } else {
+          // Revise failed - cannot provide proper fix guidance to build phase
+          const errorMsg = `Revision ${state.revisionCount} failed - unable to generate fix plan`;
+          state.context.errors.push(errorMsg);
+          state.phase = 'complete';
+          state.phaseHistory.push({
+            phase: 'revise',
+            success: false,
+            timestamp: new Date().toISOString(),
+            summary: errorMsg,
+            costUsd: reviseResult.costUsd,
+          });
+          callbacks.onPhaseComplete?.(state.phase, false);
+          return state;
+        }
         break;
       }
 
