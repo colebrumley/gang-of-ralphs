@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { DebugTracer } from '../debug/index.js';
 import type { LoopReviewStatus, LoopState, Task } from '../types/index.js';
 import type { WorktreeManager } from '../worktrees/manager.js';
+import { CircularBuffer } from './circular-buffer.js';
+
+const OUTPUT_BUFFER_CAPACITY = 100;
 
 export interface LoopManagerConfig {
   maxLoops: number;
@@ -11,6 +14,7 @@ export interface LoopManagerConfig {
 
 export class LoopManager {
   private loops: Map<string, LoopState> = new Map();
+  private outputBuffers: Map<string, CircularBuffer<string>> = new Map();
   private config: LoopManagerConfig;
   private worktreeManager: WorktreeManager | null;
   private tracer: DebugTracer | null;
@@ -84,11 +88,39 @@ export class LoopManager {
   }
 
   getLoop(loopId: string): LoopState | undefined {
-    return this.loops.get(loopId);
+    const loop = this.loops.get(loopId);
+    if (loop) {
+      this.syncLoopOutput(loopId, loop);
+    }
+    return loop;
   }
 
   getAllLoops(): LoopState[] {
+    this.syncAllOutputArrays();
     return Array.from(this.loops.values());
+  }
+
+  /**
+   * Sync a single loop's output array from its CircularBuffer.
+   */
+  private syncLoopOutput(loopId: string, loop: LoopState): void {
+    const buffer = this.outputBuffers.get(loopId);
+    if (buffer) {
+      loop.output = buffer.toArray();
+    }
+  }
+
+  /**
+   * Sync all loop output arrays from their CircularBuffers.
+   * Called before returning loops to ensure output is up-to-date.
+   */
+  private syncAllOutputArrays(): void {
+    for (const [loopId, buffer] of this.outputBuffers) {
+      const loop = this.loops.get(loopId);
+      if (loop) {
+        loop.output = buffer.toArray();
+      }
+    }
   }
 
   getActiveLoops(): LoopState[] {
@@ -139,11 +171,12 @@ export class LoopManager {
   appendOutput(loopId: string, text: string): void {
     const loop = this.loops.get(loopId);
     if (loop) {
-      loop.output.push(text);
-      // Keep only last 100 lines for TUI
-      if (loop.output.length > 100) {
-        loop.output = loop.output.slice(-100);
+      let buffer = this.outputBuffers.get(loopId);
+      if (!buffer) {
+        buffer = new CircularBuffer<string>(OUTPUT_BUFFER_CAPACITY);
+        this.outputBuffers.set(loopId, buffer);
       }
+      buffer.push(text);
     }
   }
 
@@ -165,6 +198,14 @@ export class LoopManager {
    */
   restoreLoop(loop: LoopState): void {
     this.loops.set(loop.loopId, loop);
+    // Restore CircularBuffer from existing output
+    if (loop.output.length > 0) {
+      const buffer = new CircularBuffer<string>(OUTPUT_BUFFER_CAPACITY);
+      for (const line of loop.output) {
+        buffer.push(line);
+      }
+      this.outputBuffers.set(loop.loopId, buffer);
+    }
   }
 
   // ============================================================================
