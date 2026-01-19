@@ -31,6 +31,18 @@ import type {
   Task,
 } from '../types/index.js';
 
+/**
+ * Execute a prepared statement for each item in a collection.
+ * Reduces boilerplate in save functions.
+ */
+function batchExecute<T>(sql: string, items: T[], mapper: (item: T) => unknown[]): void {
+  const db = getDatabase();
+  const stmt = db.prepare(sql);
+  for (const item of items) {
+    stmt.run(...mapper(item));
+  }
+}
+
 export interface InitStateOptions {
   specPath: string;
   effort: EffortLevel;
@@ -194,20 +206,17 @@ export function saveRun(state: OrchestratorState): void {
  * Also syncs failed task status from state.tasks array.
  */
 function saveTasks(state: OrchestratorState): void {
-  const db = getDatabase();
-
   const completedSet = new Set(state.completedTasks);
-
-  // Update all tasks, preferring completedTasks status over state.tasks status
-  const stmt = db.prepare(`
-    UPDATE tasks SET status = ?, assigned_loop_id = ? WHERE id = ? AND run_id = ?
-  `);
-
-  for (const task of state.tasks) {
-    // Use 'completed' if in completedTasks, otherwise use task's own status
-    const status = completedSet.has(task.id) ? 'completed' : task.status;
-    stmt.run(status, task.assignedLoopId ?? null, task.id, state.runId);
-  }
+  batchExecute(
+    'UPDATE tasks SET status = ?, assigned_loop_id = ? WHERE id = ? AND run_id = ?',
+    state.tasks,
+    (task) => [
+      completedSet.has(task.id) ? 'completed' : task.status,
+      task.assignedLoopId ?? null,
+      task.id,
+      state.runId,
+    ]
+  );
 }
 
 /**
@@ -216,23 +225,18 @@ function saveTasks(state: OrchestratorState): void {
  */
 function savePhaseHistory(state: OrchestratorState): void {
   const db = getDatabase();
-
-  // Count existing entries for this run
   const result = db
     .prepare('SELECT COUNT(*) as count FROM phase_history WHERE run_id = ?')
     .get(state.runId) as { count: number };
-  const existingCount = result.count;
 
-  // Insert any new entries
-  const stmt = db.prepare(`
-    INSERT INTO phase_history (run_id, phase, success, summary, cost_usd)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  for (let i = existingCount; i < state.phaseHistory.length; i++) {
-    const entry = state.phaseHistory[i];
-    // Use the cost stored in the entry (incremental cost for this phase execution)
-    stmt.run(state.runId, entry.phase, entry.success ? 1 : 0, entry.summary, entry.costUsd);
+  // Only insert new entries (those beyond existing count)
+  const newEntries = state.phaseHistory.slice(result.count);
+  if (newEntries.length > 0) {
+    batchExecute(
+      'INSERT INTO phase_history (run_id, phase, success, summary, cost_usd) VALUES (?, ?, ?, ?, ?)',
+      newEntries,
+      (entry) => [state.runId, entry.phase, entry.success ? 1 : 0, entry.summary, entry.costUsd]
+    );
   }
 }
 
@@ -241,19 +245,14 @@ function savePhaseHistory(state: OrchestratorState): void {
  * Uses upsert to handle both new and existing entries.
  */
 function savePhaseCosts(state: OrchestratorState): void {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    INSERT INTO phase_costs (run_id, phase, cost_usd)
-    VALUES (?, ?, ?)
-    ON CONFLICT(run_id, phase) DO UPDATE SET cost_usd = excluded.cost_usd
-  `);
-
-  for (const [phase, costUsd] of Object.entries(state.costs.phaseCosts)) {
-    if (costUsd > 0) {
-      stmt.run(state.runId, phase, costUsd);
-    }
-  }
+  const entries = Object.entries(state.costs.phaseCosts).filter(([, cost]) => cost > 0);
+  batchExecute(
+    `INSERT INTO phase_costs (run_id, phase, cost_usd)
+     VALUES (?, ?, ?)
+     ON CONFLICT(run_id, phase) DO UPDATE SET cost_usd = excluded.cost_usd`,
+    entries,
+    ([phase, costUsd]) => [state.runId, phase, costUsd]
+  );
 }
 
 /**
@@ -261,20 +260,14 @@ function savePhaseCosts(state: OrchestratorState): void {
  * Uses INSERT OR REPLACE to handle both new loops and updates.
  */
 function saveLoops(state: OrchestratorState): void {
-  const db = getDatabase();
-
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO loops (
+  batchExecute(
+    `INSERT OR REPLACE INTO loops (
       id, run_id, task_ids, iteration, max_iterations, review_interval,
       last_review_at, status, same_error_count, no_progress_count,
       last_error, last_file_change_iteration, last_activity_at, cost_usd, worktree_path, phase
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const loop of state.activeLoops) {
-    const costUsd = state.costs.loopCosts[loop.loopId] ?? 0;
-
-    stmt.run(
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    state.activeLoops,
+    (loop) => [
       loop.loopId,
       state.runId,
       JSON.stringify(loop.taskIds),
@@ -288,11 +281,11 @@ function saveLoops(state: OrchestratorState): void {
       loop.stuckIndicators.lastError,
       loop.stuckIndicators.lastFileChangeIteration,
       loop.stuckIndicators.lastActivityAt,
-      costUsd,
+      state.costs.loopCosts[loop.loopId] ?? 0,
       loop.worktreePath,
-      loop.phase
-    );
-  }
+      loop.phase,
+    ]
+  );
 }
 
 /**
@@ -300,26 +293,22 @@ function saveLoops(state: OrchestratorState): void {
  * Replaces all existing conflicts with current state to handle both additions and removals.
  */
 function savePendingConflicts(state: OrchestratorState): void {
-  const db = getDatabase();
-
   // Delete all existing pending conflicts for this run
-  db.prepare('DELETE FROM pending_conflicts WHERE run_id = ?').run(state.runId);
+  getDatabase().prepare('DELETE FROM pending_conflicts WHERE run_id = ?').run(state.runId);
 
   // Insert current pending conflicts
   if (state.pendingConflicts.length > 0) {
-    const stmt = db.prepare(`
-      INSERT INTO pending_conflicts (run_id, loop_id, task_id, conflict_files)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    for (const conflict of state.pendingConflicts) {
-      stmt.run(
+    batchExecute(
+      `INSERT INTO pending_conflicts (run_id, loop_id, task_id, conflict_files)
+       VALUES (?, ?, ?, ?)`,
+      state.pendingConflicts,
+      (conflict) => [
         state.runId,
         conflict.loopId,
         conflict.taskId,
-        JSON.stringify(conflict.conflictFiles)
-      );
-    }
+        JSON.stringify(conflict.conflictFiles),
+      ]
+    );
   }
 }
 

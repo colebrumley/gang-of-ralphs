@@ -30,6 +30,109 @@ export interface ReviewResult {
 }
 
 /**
+ * Internal helper that executes an agent query and handles streaming output.
+ * Shared between executeReview and executeLoopReview to eliminate duplication.
+ */
+async function runReviewAgent(
+  prompt: string,
+  cwd: string,
+  config: ReturnType<typeof createAgentConfig>,
+  runId: string,
+  dbPath: string,
+  onOutput?: (text: string) => void,
+  tracer?: DebugTracer,
+  loopId?: string
+): Promise<{ fullOutput: string; costUsd: number }> {
+  let fullOutput = '';
+  let costUsd = 0;
+  const startTime = Date.now();
+
+  const writer = tracer?.startAgentCall({
+    phase: 'review',
+    ...(loopId && { loopId }),
+    prompt,
+  });
+
+  for await (const message of query({
+    prompt,
+    options: {
+      cwd,
+      allowedTools: config.allowedTools,
+      maxTurns: config.maxTurns,
+      model: config.model,
+      includePartialMessages: true,
+      mcpServers: {
+        'sq-db': {
+          command: 'node',
+          args: [MCP_SERVER_PATH, runId, dbPath],
+        },
+      },
+    },
+  })) {
+    // Handle tool progress messages
+    if (isToolProgressMessage(message)) {
+      const toolName = message.tool_name || 'tool';
+      const elapsed = message.elapsed_time_seconds || 0;
+      const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)\n`;
+      writer?.appendOutput(progressText);
+      onOutput?.(progressText);
+    }
+    // Handle streaming events
+    if (isStreamEventMessage(message)) {
+      const event = message.event as StreamEvent;
+      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        const toolName = event.content_block.name || 'tool';
+        const toolText = `[tool] starting ${toolName}\n`;
+        writer?.appendOutput(toolText);
+        onOutput?.(toolText);
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+        const thinkingText = event.delta.thinking || '';
+        if (thinkingText) {
+          writer?.appendOutput(thinkingText);
+          onOutput?.(`[thinking] ${thinkingText}`);
+        }
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        const textDelta = event.delta.text || '';
+        if (textDelta) {
+          fullOutput += textDelta;
+          writer?.appendOutput(textDelta);
+          onOutput?.(textDelta);
+        }
+      }
+    }
+    if (message.type === 'assistant' && message.message?.content) {
+      for (const block of message.message.content) {
+        if ('text' in block && !fullOutput.includes(block.text)) {
+          fullOutput += block.text;
+          writer?.appendOutput(block.text);
+          onOutput?.(block.text);
+        }
+        if (
+          'type' in block &&
+          block.type === 'thinking' &&
+          'thinking' in block &&
+          typeof block.thinking === 'string'
+        ) {
+          const thinkingText = `[thinking] ${block.thinking}\n`;
+          writer?.appendOutput(thinkingText);
+          onOutput?.(thinkingText);
+        }
+      }
+    }
+    if (isResultMessage(message)) {
+      costUsd = message.total_cost_usd || 0;
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
+  await writer?.complete(costUsd, durationMs);
+
+  return { fullOutput, costUsd };
+}
+
+/**
  * Load review results from database after agent has written them via MCP set_review_result.
  */
 export function loadReviewResultFromDB(runId: string): {
@@ -550,6 +653,7 @@ export async function executeReview(
   const model = getModelId(effortConfig.models.review);
   const config = createAgentConfig('review', cwd, state.runId, dbPath, model);
 
+  // Build context based on review type
   let context = '';
   switch (reviewType) {
     case 'enumerate':
@@ -570,7 +674,6 @@ export async function executeReview(
     }
   }
 
-  // reviewType is validated by switch above; default to 'build' if somehow null
   const effectiveReviewType = reviewType ?? 'build';
   const prompt = `${getReviewPrompt(depth, effectiveReviewType)}
 
@@ -580,109 +683,21 @@ ${context}
 ## Spec:
 File: ${state.specPath}`;
 
-  let fullOutput = '';
-  let costUsd = 0;
-  const startTime = Date.now();
-
-  const writer = tracer?.startAgentCall({
-    phase: 'review',
+  const { costUsd } = await runReviewAgent(
     prompt,
-  });
+    cwd,
+    config,
+    state.runId,
+    dbPath,
+    onOutput,
+    tracer
+  );
 
-  for await (const message of query({
-    prompt,
-    options: {
-      cwd,
-      allowedTools: config.allowedTools,
-      maxTurns: config.maxTurns,
-      model: config.model,
-      includePartialMessages: true,
-      mcpServers: {
-        'sq-db': {
-          command: 'node',
-          args: [MCP_SERVER_PATH, state.runId, dbPath],
-        },
-      },
-    },
-  })) {
-    // Handle tool progress messages to show activity during tool execution
-    if (isToolProgressMessage(message)) {
-      const toolName = message.tool_name || 'tool';
-      const elapsed = message.elapsed_time_seconds || 0;
-      const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)\n`;
-      writer?.appendOutput(progressText);
-      onOutput?.(progressText);
-    }
-    // Handle streaming events for real-time thinking output
-    if (isStreamEventMessage(message)) {
-      const event = message.event as StreamEvent;
-      // Handle tool_use content block start to show when a tool begins
-      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        const toolName = event.content_block.name || 'tool';
-        const toolText = `[tool] starting ${toolName}\n`;
-        writer?.appendOutput(toolText);
-        onOutput?.(toolText);
-      }
-      // Handle thinking delta events
-      if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
-        const thinkingText = event.delta.thinking || '';
-        if (thinkingText) {
-          writer?.appendOutput(thinkingText);
-          onOutput?.(`[thinking] ${thinkingText}`);
-        }
-      }
-      // Handle text delta events
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        const textDelta = event.delta.text || '';
-        if (textDelta) {
-          fullOutput += textDelta;
-          writer?.appendOutput(textDelta);
-          onOutput?.(textDelta);
-        }
-      }
-    }
-    if (message.type === 'assistant' && message.message?.content) {
-      for (const block of message.message.content) {
-        // Only handle text blocks that weren't already streamed
-        if ('text' in block && !fullOutput.includes(block.text)) {
-          fullOutput += block.text;
-          writer?.appendOutput(block.text);
-          onOutput?.(block.text);
-        }
-        // Capture thinking blocks to show activity during extended thinking
-        if (
-          'type' in block &&
-          block.type === 'thinking' &&
-          'thinking' in block &&
-          typeof block.thinking === 'string'
-        ) {
-          const thinkingText = `[thinking] ${block.thinking}\n`;
-          writer?.appendOutput(thinkingText);
-          onOutput?.(thinkingText);
-        }
-      }
-    }
-    if (isResultMessage(message)) {
-      costUsd = message.total_cost_usd || 0;
-    }
-  }
-
-  const durationMs = Date.now() - startTime;
-  await writer?.complete(costUsd, durationMs);
-
-  // Review result is now in the database via MCP set_review_result call
   const { passed, issues, interpretedIntent, intentSatisfied } = loadReviewResultFromDB(
     state.runId
   );
 
-  return {
-    passed,
-    issues,
-    suggestions: [],
-    costUsd,
-    interpretedIntent,
-    intentSatisfied,
-  };
+  return { passed, issues, suggestions: [], costUsd, interpretedIntent, intentSatisfied };
 }
 
 // ============================================================================
@@ -937,8 +952,6 @@ export async function executeLoopReview(
   const dbPath = join(state.stateDir, 'state.db');
   const effortConfig = getEffortConfig(state.effort);
   const model = getModelId(effortConfig.models.review);
-
-  // Use worktree path if available
   const cwd = loop.worktreePath || process.cwd();
   const config = createAgentConfig('review', cwd, state.runId, dbPath, model);
 
@@ -947,102 +960,19 @@ export async function executeLoopReview(
 ## Spec:
 File: ${state.specPath}`;
 
-  let fullOutput = '';
-  let costUsd = 0;
-  const startTime = Date.now();
-
-  const writer = tracer?.startAgentCall({
-    phase: 'review',
-    loopId: loop.loopId,
+  const { costUsd } = await runReviewAgent(
     prompt,
-  });
+    cwd,
+    config,
+    state.runId,
+    dbPath,
+    onOutput,
+    tracer,
+    loop.loopId
+  );
 
-  for await (const message of query({
-    prompt,
-    options: {
-      cwd,
-      allowedTools: config.allowedTools,
-      maxTurns: config.maxTurns,
-      model: config.model,
-      includePartialMessages: true,
-      mcpServers: {
-        'sq-db': {
-          command: 'node',
-          args: [MCP_SERVER_PATH, state.runId, dbPath],
-        },
-      },
-    },
-  })) {
-    // Handle tool progress messages
-    if (isToolProgressMessage(message)) {
-      const toolName = message.tool_name || 'tool';
-      const elapsed = message.elapsed_time_seconds || 0;
-      const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)\n`;
-      writer?.appendOutput(progressText);
-      onOutput?.(progressText);
-    }
-    // Handle streaming events
-    if (isStreamEventMessage(message)) {
-      const event = message.event as StreamEvent;
-      if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
-        const toolName = event.content_block.name || 'tool';
-        const toolText = `[tool] starting ${toolName}\n`;
-        writer?.appendOutput(toolText);
-        onOutput?.(toolText);
-      }
-      if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
-        const thinkingText = event.delta.thinking || '';
-        if (thinkingText) {
-          writer?.appendOutput(thinkingText);
-          onOutput?.(`[thinking] ${thinkingText}`);
-        }
-      }
-      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-        const textDelta = event.delta.text || '';
-        if (textDelta) {
-          fullOutput += textDelta;
-          writer?.appendOutput(textDelta);
-          onOutput?.(textDelta);
-        }
-      }
-    }
-    if (message.type === 'assistant' && message.message?.content) {
-      for (const block of message.message.content) {
-        if ('text' in block && !fullOutput.includes(block.text)) {
-          fullOutput += block.text;
-          writer?.appendOutput(block.text);
-          onOutput?.(block.text);
-        }
-        if (
-          'type' in block &&
-          block.type === 'thinking' &&
-          'thinking' in block &&
-          typeof block.thinking === 'string'
-        ) {
-          const thinkingText = `[thinking] ${block.thinking}\n`;
-          writer?.appendOutput(thinkingText);
-          onOutput?.(thinkingText);
-        }
-      }
-    }
-    if (isResultMessage(message)) {
-      costUsd = message.total_cost_usd || 0;
-    }
-  }
-
-  const durationMs = Date.now() - startTime;
-  await writer?.complete(costUsd, durationMs);
-
-  // Load review result from database
   const { reviewId, passed, issues, interpretedIntent, intentSatisfied } =
     loadLoopReviewResultFromDB(state.runId, loop.loopId);
 
-  return {
-    passed,
-    issues,
-    costUsd,
-    reviewId: reviewId || '',
-    interpretedIntent,
-    intentSatisfied,
-  };
+  return { passed, issues, costUsd, reviewId: reviewId || '', interpretedIntent, intentSatisfied };
 }
