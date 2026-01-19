@@ -167,21 +167,16 @@ export async function executeBuildIteration(
   // Spawn new loops for available tasks
   const nextGroup = getNextParallelGroup(graph, state.completedTasks);
   if (nextGroup && canStartGroup(nextGroup, state.completedTasks, state.tasks)) {
-    // Get task IDs that already have active loops (to avoid duplicates)
-    const tasksWithActiveLoops = new Set(
-      loopManager
-        .getAllLoops()
-        .filter(
-          (l) => l.status === 'running' || l.status === 'pending' || l.status === 'interrupted'
-        )
-        .flatMap((l) => l.taskIds)
-    );
+    // Get task IDs that already have loops (to avoid duplicates)
+    // Include ALL loops regardless of status - stuck/failed loops should NOT trigger
+    // new loops for the same task, as that causes duplicate scaffolding and work
+    const tasksWithLoops = new Set(loopManager.getAllLoops().flatMap((l) => l.taskIds));
 
     while (loopManager.canSpawnMore() && nextGroup.length > 0) {
       const taskId = nextGroup.shift()!;
 
-      // Skip if task already has an active loop (prevents duplicate scaffolding)
-      if (tasksWithActiveLoops.has(taskId)) {
+      // Skip if task already has a loop (prevents duplicate scaffolding)
+      if (tasksWithLoops.has(taskId)) {
         continue;
       }
 
