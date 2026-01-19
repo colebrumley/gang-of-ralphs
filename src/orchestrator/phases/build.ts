@@ -1,5 +1,9 @@
+import { exec } from 'node:child_process';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+
+const execAsync = promisify(exec);
 import { BUILD_PROMPT } from '../../agents/prompts.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig, getModelId } from '../../config/effort.js';
@@ -27,6 +31,33 @@ import {
   isToolProgressMessage,
 } from '../../types/index.js';
 import { executeLoopReview } from './review.js';
+
+/**
+ * Gets a snapshot of the current git state for detecting file changes.
+ * Returns the HEAD SHA and a hash of uncommitted changes.
+ */
+async function getGitState(cwd: string): Promise<string> {
+  try {
+    // Get HEAD SHA
+    const { stdout: headSha } = await execAsync('git rev-parse HEAD', { cwd });
+    // Get list of uncommitted changes (staged and unstaged)
+    const { stdout: status } = await execAsync('git status --porcelain', { cwd });
+    return `${headSha.trim()}|${status.trim()}`;
+  } catch {
+    // If git commands fail (e.g., not a git repo), return empty string
+    return '';
+  }
+}
+
+/**
+ * Compares two git states to determine if files changed.
+ * Returns true if the HEAD moved or uncommitted changes differ.
+ */
+function filesChangedBetweenStates(before: string, after: string): boolean {
+  // If either state is empty (git failed), assume files changed to avoid false stuck detection
+  if (!before || !after) return true;
+  return before !== after;
+}
 
 export function buildPromptWithFeedback(
   task: Task,
@@ -203,7 +234,6 @@ export async function executeBuildIteration(
     const config = createAgentConfig('build', loopCwd, state.runId, dbPath, model);
 
     let output = '';
-    let hasError = false;
     let errorMessage: string | null = null;
     let costUsd = 0;
     const startTime = Date.now();
@@ -222,6 +252,9 @@ export async function executeBuildIteration(
 
     // Create idle monitor to detect hung agents
     const idleMonitor = createIdleMonitor();
+
+    // Capture git state before iteration to detect actual file changes
+    const gitStateBefore = await getGitState(loopCwd);
 
     try {
       // Race the query loop against the idle timeout
@@ -461,7 +494,6 @@ export async function executeBuildIteration(
       if (output.includes('TASK_STUCK:')) {
         const stuckMatch = output.match(/TASK_STUCK:\s*(.+)/);
         errorMessage = stuckMatch?.[1] || 'Unknown reason';
-        hasError = true;
       }
     } catch (e) {
       if (e instanceof IdleTimeoutError) {
@@ -479,7 +511,6 @@ export async function executeBuildIteration(
           idleTimeout: true,
         };
       }
-      hasError = true;
       errorMessage = String(e);
       // Log the error to trace for debugging
       tracer?.logError(`Loop ${loop.loopId} error: ${errorMessage}`, 'build');
@@ -487,8 +518,12 @@ export async function executeBuildIteration(
       idleMonitor.cancel();
     }
 
+    // Capture git state after iteration to detect actual file changes
+    const gitStateAfter = await getGitState(loopCwd);
+    const filesChanged = filesChangedBetweenStates(gitStateBefore, gitStateAfter);
+
     loopManager.incrementIteration(loop.loopId);
-    updateStuckIndicators(loop, errorMessage, !hasError);
+    updateStuckIndicators(loop, errorMessage, filesChanged);
 
     // Check if this loop needs a checkpoint review (interim review during long-running tasks)
     const checkpointInterval = effortConfig.checkpointReviewInterval;
