@@ -190,6 +190,10 @@ export async function executeBuildIteration(
     let costUsd = 0;
     const startTime = Date.now();
 
+    // Buffers for accumulating partial lines from streaming output
+    let lineBuffer = '';
+    let thinkingLineBuffer = '';
+
     // Start streaming writer
     const writer = tracer?.startAgentCall({
       phase: 'build',
@@ -234,7 +238,14 @@ export async function executeBuildIteration(
                 if (thinkingText) {
                   writer?.appendOutput(thinkingText);
                   onLoopOutput?.(loop.loopId, `[thinking] ${thinkingText}`);
-                  loopManager.appendOutput(loop.loopId, `[thinking] ${thinkingText}`);
+
+                  // Buffer thinking text and only output complete lines to TUI
+                  thinkingLineBuffer += thinkingText;
+                  const lines = thinkingLineBuffer.split('\n');
+                  thinkingLineBuffer = lines.pop() || '';
+                  for (const line of lines) {
+                    loopManager.appendOutput(loop.loopId, `[thinking] ${line}`);
+                  }
                 }
               }
               // Handle text delta events
@@ -244,7 +255,16 @@ export async function executeBuildIteration(
                   output += textDelta;
                   writer?.appendOutput(textDelta);
                   onLoopOutput?.(loop.loopId, textDelta);
-                  loopManager.appendOutput(loop.loopId, textDelta);
+
+                  // Buffer text and only output complete lines to TUI
+                  lineBuffer += textDelta;
+                  const lines = lineBuffer.split('\n');
+                  // Keep the last part (incomplete line) in the buffer
+                  lineBuffer = lines.pop() || '';
+                  // Output complete lines
+                  for (const line of lines) {
+                    loopManager.appendOutput(loop.loopId, line);
+                  }
                 }
               }
             }
@@ -274,6 +294,15 @@ export async function executeBuildIteration(
             if (message.type === 'result') {
               costUsd = (message as any).total_cost_usd || 0;
             }
+          }
+          // Flush any remaining buffered content
+          if (thinkingLineBuffer) {
+            loopManager.appendOutput(loop.loopId, `[thinking] ${thinkingLineBuffer}`);
+            thinkingLineBuffer = '';
+          }
+          if (lineBuffer) {
+            loopManager.appendOutput(loop.loopId, lineBuffer);
+            lineBuffer = '';
           }
         })(),
         idleMonitor.promise,
