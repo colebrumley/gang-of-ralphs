@@ -1,4 +1,5 @@
 import { exec } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -57,6 +58,26 @@ function filesChangedBetweenStates(before: string, after: string): boolean {
   // If either state is empty (git failed), assume files changed to avoid false stuck detection
   if (!before || !after) return true;
   return before !== after;
+}
+
+/**
+ * Reads the scratchpad for a loop if it exists.
+ * Checks worktree path first, then falls back to state directory.
+ */
+function readScratchpad(loopCwd: string, loopId: string, stateDir: string): string | null {
+  // Try worktree location first
+  const worktreePath = join(loopCwd, '.sq-scratchpad.md');
+  if (existsSync(worktreePath)) {
+    return readFileSync(worktreePath, 'utf-8');
+  }
+
+  // Fall back to state dir
+  const statePath = join(stateDir, 'scratchpads', `${loopId}.md`);
+  if (existsSync(statePath)) {
+    return readFileSync(statePath, 'utf-8');
+  }
+
+  return null;
 }
 
 export function buildPromptWithFeedback(
