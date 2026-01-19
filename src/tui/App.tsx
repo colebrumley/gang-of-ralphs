@@ -1,4 +1,4 @@
-import { useApp, useInput } from 'ink';
+import { useApp, useInput, useStdout } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { closeDatabase } from '../db/index.js';
 import type { DebugTracer } from '../debug/index.js';
@@ -62,6 +62,18 @@ export function App({ initialState, tracer }: AppProps) {
 
   // UI state for task panel visibility
   const [showTaskPanel, setShowTaskPanel] = useState(false);
+
+  // UI state for column pagination on narrow terminals
+  const [currentPage, setCurrentPage] = useState(0);
+
+  // Calculate visible columns based on terminal width (must match Layout.tsx calculation)
+  const { stdout } = useStdout();
+  const terminalWidth = stdout?.columns || 120;
+  const MIN_COLUMN_WIDTH = 60;
+  const maxVisibleColumns = Math.max(1, Math.floor(terminalWidth / MIN_COLUMN_WIDTH));
+  const visibleColumns = Math.min(state.maxLoops, maxVisibleColumns);
+  const totalLoops = Math.min(loops.length, state.maxLoops);
+  const totalPages = Math.max(1, Math.ceil(totalLoops / visibleColumns));
 
   // Keep stateRef in sync for signal handler access
   useEffect(() => {
@@ -136,10 +148,24 @@ export function App({ initialState, tracer }: AppProps) {
         reviewType: prev.phase === 'build' ? 'build' : prev.phase === 'plan' ? 'plan' : 'enumerate',
       }));
     }
-    // Focus on loop column 1-4 (or unfocus if same key pressed again)
-    if (input >= '1' && input <= '4') {
-      const index = Number.parseInt(input, 10) - 1;
-      setFocusedLoopIndex((prev) => (prev === index ? null : index));
+    // Focus on visible column (1-N where N is visibleColumns)
+    // Key maps to global loop index based on current page
+    const keyNum = Number.parseInt(input, 10);
+    if (keyNum >= 1 && keyNum <= visibleColumns) {
+      const globalIndex = currentPage * visibleColumns + (keyNum - 1);
+      // Only focus if the loop exists
+      if (globalIndex < totalLoops) {
+        setFocusedLoopIndex((prev) => (prev === globalIndex ? null : globalIndex));
+      }
+    }
+    // Page navigation with wrap-around
+    if (input === '[') {
+      setCurrentPage((prev) => (prev === 0 ? totalPages - 1 : prev - 1));
+      setFocusedLoopIndex(null); // Clear focus when changing pages
+    }
+    if (input === ']') {
+      setCurrentPage((prev) => (prev === totalPages - 1 ? 0 : prev + 1));
+      setFocusedLoopIndex(null); // Clear focus when changing pages
     }
     // Toggle task panel
     if (input === 't') {
@@ -216,7 +242,17 @@ export function App({ initialState, tracer }: AppProps) {
       }
 
       setState(newState);
-      setLoops(newState.activeLoops);
+      // Merge loop state: preserve TUI's line-buffered output, update other fields from orchestrator
+      setLoops((prevLoops) =>
+        newState.activeLoops.map((newLoop) => {
+          const prevLoop = prevLoops.find((l) => l.loopId === newLoop.loopId);
+          // Preserve TUI's buffered output if we have it, otherwise use orchestrator's
+          return {
+            ...newLoop,
+            output: prevLoop?.output ?? newLoop.output,
+          };
+        })
+      );
 
       // Save state after each phase for resume support (matches non-TUI behavior)
       saveRun(newState);
@@ -250,6 +286,7 @@ export function App({ initialState, tracer }: AppProps) {
       focusedLoopIndex={focusedLoopIndex}
       lastActivityTime={lastActivityTime}
       showTaskPanel={showTaskPanel}
+      currentPage={currentPage}
     />
   );
 }

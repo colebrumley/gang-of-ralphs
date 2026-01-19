@@ -14,7 +14,10 @@ interface LayoutProps {
   focusedLoopIndex: number | null;
   lastActivityTime: number;
   showTaskPanel: boolean;
+  currentPage: number;
 }
+
+const MIN_COLUMN_WIDTH = 60;
 
 export function Layout({
   state,
@@ -25,9 +28,15 @@ export function Layout({
   focusedLoopIndex,
   lastActivityTime,
   showTaskPanel,
+  currentPage,
 }: LayoutProps) {
   const { stdout } = useStdout();
   const terminalHeight = stdout?.rows || 24;
+  const terminalWidth = stdout?.columns || 120;
+
+  // Calculate how many columns can fit based on terminal width
+  const maxVisibleColumns = Math.max(1, Math.floor(terminalWidth / MIN_COLUMN_WIDTH));
+  const visibleColumns = Math.min(state.maxLoops, maxVisibleColumns);
 
   const activeLoops = loops.filter((l) => l.status === 'running' || l.status === 'pending');
   // Minimize status area during build phase when loops are active
@@ -45,6 +54,15 @@ export function Layout({
     };
     return priority(a.status) - priority(b.status);
   });
+
+  // Pagination calculations
+  const totalLoops = Math.min(sortedLoops.length, state.maxLoops);
+  const totalPages = Math.max(1, Math.ceil(totalLoops / visibleColumns));
+  const safePage = Math.min(currentPage, totalPages - 1);
+  const startIndex = safePage * visibleColumns;
+  const endIndex = Math.min(startIndex + visibleColumns, totalLoops);
+  const visibleLoops = sortedLoops.slice(startIndex, endIndex);
+  const isPaginated = totalPages > 1;
 
   return (
     <Box flexDirection="column" height={terminalHeight}>
@@ -66,24 +84,26 @@ export function Layout({
       <Box flexGrow={1} overflow="hidden">
         {/* Loop columns container */}
         <Box width={showTaskPanel ? '70%' : '100%'} height="100%">
-          {sortedLoops.slice(0, state.maxLoops).map((loop, index) => {
+          {visibleLoops.map((loop, index) => {
             const task = state.tasks.find((t) => t.id === loop.taskIds[0]);
-            const isFocused = focusedLoopIndex === index;
+            // focusedLoopIndex is global, convert to check if this visible column is focused
+            const globalIndex = startIndex + index;
+            const isFocused = focusedLoopIndex === globalIndex;
             return (
               <Column
                 key={loop.loopId}
                 loop={loop}
                 taskTitle={task?.title || 'Unknown'}
                 isFocused={isFocused}
-                totalColumns={state.maxLoops}
+                totalColumns={visibleColumns}
               />
             );
           })}
 
-          {/* Empty columns if fewer loops than max */}
-          {Array.from({ length: Math.max(0, state.maxLoops - sortedLoops.length) }).map((_, i) => {
+          {/* Empty columns if fewer visible loops than visible columns */}
+          {Array.from({ length: Math.max(0, visibleColumns - visibleLoops.length) }).map((_, i) => {
             const emptyColumnWidth =
-              state.maxLoops === 1 ? '100%' : `${Math.floor(100 / state.maxLoops)}%`;
+              visibleColumns === 1 ? '100%' : `${Math.floor(100 / visibleColumns)}%`;
             return (
               <Box key={`empty-${i}`} borderStyle="single" width={emptyColumnWidth} height="100%">
                 <Box paddingX={1}>
@@ -105,8 +125,16 @@ export function Layout({
       </Box>
 
       {/* Footer */}
-      <Box borderStyle="single" paddingX={1}>
-        <Text dimColor>[q]uit [p]ause [r]eview now [t]asks [1-4] focus</Text>
+      <Box borderStyle="single" paddingX={1} justifyContent="space-between">
+        <Text dimColor>
+          [q]uit [p]ause [r]eview [t]asks [1-{visibleColumns}] focus
+          {isPaginated && ' [/] page'}
+        </Text>
+        {isPaginated && (
+          <Text dimColor>
+            Page {safePage + 1}/{totalPages}
+          </Text>
+        )}
       </Box>
     </Box>
   );
