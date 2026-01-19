@@ -31,6 +31,16 @@ export interface ReviewIssue {
   suggestion: string;
 }
 
+export interface CodebaseAnalysis {
+  projectType: string; // e.g., "TypeScript Node.js application", "React frontend", "empty"
+  techStack: string[]; // e.g., ["TypeScript", "Node.js", "SQLite", "React"]
+  directoryStructure: string; // Brief description of organization
+  existingFeatures: string[]; // What the codebase already does
+  entryPoints: string[]; // Main entry files
+  patterns: string[]; // Key patterns/conventions observed
+  summary: string; // 2-3 sentence overall summary
+}
+
 export interface PhaseResult {
   phase: Phase;
   success: boolean;
@@ -110,4 +120,7 @@ export interface OrchestratorState {
   // Scaffolding detection - persisted once at run start to avoid race conditions
   // between ENUMERATE and PLAN phases (Risk #3 mitigation for scaffold detection)
   wasEmptyProject: boolean | null; // null means not yet checked
+
+  // Codebase analysis from ANALYZE phase
+  codebaseAnalysis: CodebaseAnalysis | null;
 }
