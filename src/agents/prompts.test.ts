@@ -17,8 +17,9 @@ describe('Build Prompt', () => {
     assert.ok(BUILD_PROMPT.includes('TASK_STUCK'), 'Should include TASK_STUCK signal');
   });
 
-  test('includes How to Work section with scratchpad', () => {
+  test('includes How to Work section with write_context', () => {
     assert.ok(BUILD_PROMPT.includes('How to Work'), 'Should include How to Work section');
-    assert.ok(BUILD_PROMPT.includes('write_scratchpad'), 'Should reference write_scratchpad tool');
+    assert.ok(BUILD_PROMPT.includes('write_context'), 'Should reference write_context tool');
+    assert.ok(BUILD_PROMPT.includes('read_context'), 'Should reference read_context tool');
   });
 });

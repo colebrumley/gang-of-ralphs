@@ -72,6 +72,64 @@ export const SetCodebaseAnalysisSchema = z.object({
   summary: z.string(),
 });
 
+// Review tool schemas
+export const ReviewIssueSchema = z.object({
+  taskId: z.string().optional().describe('Task ID this issue relates to'),
+  file: z.string().describe('File path where issue was found'),
+  line: z.number().optional().describe('Line number of issue'),
+  type: z
+    .enum([
+      'over-engineering',
+      'missing-error-handling',
+      'pattern-violation',
+      'dead-code',
+      'spec-intent-mismatch',
+    ])
+    .describe('Issue type'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('How to fix the issue'),
+});
+
+export const SetReviewResultSchema = z.object({
+  interpretedIntent: z
+    .string()
+    .optional()
+    .describe('What the user was actually trying to accomplish'),
+  intentSatisfied: z.boolean().optional().describe('Does the implementation serve this intent?'),
+  passed: z.boolean().describe('Whether the review passed'),
+  issues: z.array(ReviewIssueSchema).default([]).describe('List of issues found'),
+});
+
+export const LoopReviewIssueSchema = z.object({
+  file: z.string().describe('File path where issue was found'),
+  line: z.number().optional().describe('Line number of issue'),
+  type: z
+    .enum([
+      'over-engineering',
+      'missing-error-handling',
+      'pattern-violation',
+      'dead-code',
+      'spec-intent-mismatch',
+    ])
+    .describe('Issue type'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('How to fix the issue'),
+});
+
+export const SetLoopReviewResultSchema = z.object({
+  loopId: z.string().describe('Loop ID being reviewed'),
+  taskId: z.string().describe('Task ID being reviewed'),
+  passed: z.boolean().describe('Whether the review passed'),
+  interpretedIntent: z.string().optional().describe('What the task was trying to accomplish'),
+  intentSatisfied: z.boolean().optional().describe('Does the implementation serve this intent?'),
+  issues: z.array(LoopReviewIssueSchema).default([]).describe('List of issues found'),
+});
+
+export type ReviewIssue = z.infer<typeof ReviewIssueSchema>;
+export type SetReviewResult = z.infer<typeof SetReviewResultSchema>;
+export type LoopReviewIssue = z.infer<typeof LoopReviewIssueSchema>;
+export type SetLoopReviewResult = z.infer<typeof SetLoopReviewResultSchema>;
+
 export const WriteContextSchema = z.object({
   type: z
     .enum(['discovery', 'error', 'decision', 'review_issue', 'scratchpad', 'codebase_analysis'])

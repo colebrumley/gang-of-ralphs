@@ -14,6 +14,8 @@ import {
   ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
+  SetLoopReviewResultSchema,
+  SetReviewResultSchema,
   UpdateLoopStatusSchema,
   WriteContextSchema,
   WriteTaskSchema,
@@ -279,6 +281,99 @@ export function createMCPServer(runId: string, dbPath: string) {
           required: [],
         },
       },
+      {
+        name: 'set_review_result',
+        description:
+          'Record the result of a run-level review. Use this after completing review of build work.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            interpretedIntent: {
+              type: 'string',
+              description: 'What the user was actually trying to accomplish',
+            },
+            intentSatisfied: {
+              type: 'boolean',
+              description: 'Does the implementation serve this intent?',
+            },
+            passed: { type: 'boolean', description: 'Whether the review passed' },
+            issues: {
+              type: 'array',
+              description: 'List of issues found',
+              items: {
+                type: 'object',
+                properties: {
+                  taskId: { type: 'string', description: 'Task ID this issue relates to' },
+                  file: { type: 'string', description: 'File path where issue was found' },
+                  line: { type: 'number', description: 'Line number of issue' },
+                  type: {
+                    type: 'string',
+                    enum: [
+                      'over-engineering',
+                      'missing-error-handling',
+                      'pattern-violation',
+                      'dead-code',
+                      'spec-intent-mismatch',
+                    ],
+                    description: 'Issue type',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'How to fix the issue' },
+                },
+                required: ['file', 'type', 'description', 'suggestion'],
+              },
+            },
+          },
+          required: ['passed'],
+        },
+      },
+      {
+        name: 'set_loop_review_result',
+        description:
+          'Record the result of a per-loop review. Use this after reviewing work from a specific loop.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            loopId: { type: 'string', description: 'Loop ID being reviewed' },
+            taskId: { type: 'string', description: 'Task ID being reviewed' },
+            passed: { type: 'boolean', description: 'Whether the review passed' },
+            interpretedIntent: {
+              type: 'string',
+              description: 'What the task was trying to accomplish',
+            },
+            intentSatisfied: {
+              type: 'boolean',
+              description: 'Does the implementation serve this intent?',
+            },
+            issues: {
+              type: 'array',
+              description: 'List of issues found',
+              items: {
+                type: 'object',
+                properties: {
+                  file: { type: 'string', description: 'File path where issue was found' },
+                  line: { type: 'number', description: 'Line number of issue' },
+                  type: {
+                    type: 'string',
+                    enum: [
+                      'over-engineering',
+                      'missing-error-handling',
+                      'pattern-violation',
+                      'dead-code',
+                      'spec-intent-mismatch',
+                    ],
+                    description: 'Issue type',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'How to fix the issue' },
+                },
+                required: ['file', 'type', 'description', 'suggestion'],
+              },
+            },
+          },
+          required: ['loopId', 'taskId', 'passed'],
+        },
+      },
     ],
   }));
 
@@ -479,6 +574,98 @@ export function createMCPServer(runId: string, dbPath: string) {
           order: opts.order,
         });
         result = { content: [{ type: 'text', text: JSON.stringify({ entries, total }) }] };
+        break;
+      }
+
+      case 'set_review_result': {
+        const review = SetReviewResultSchema.parse(args);
+
+        // Clear previous run-level review issues from unified context table
+        db.prepare(
+          `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
+        ).run(runId);
+
+        // Store structured review issues in unified context table
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO context (run_id, type, content, task_id, file, line)
+            VALUES (?, 'review_issue', ?, ?, ?, ?)
+          `).run(
+            runId,
+            JSON.stringify({
+              issue_type: issue.type,
+              description: issue.description,
+              suggestion: issue.suggestion,
+            }),
+            issue.taskId ?? null,
+            issue.file,
+            issue.line ?? null
+          );
+        }
+
+        // Update runs table for intent analysis
+        db.prepare(`
+          UPDATE runs SET pending_review = 0, interpreted_intent = ?, intent_satisfied = ?
+          WHERE id = ?
+        `).run(review.interpretedIntent ?? null, review.intentSatisfied ? 1 : 0, runId);
+
+        result = {
+          content: [
+            {
+              type: 'text',
+              text: `Review result recorded (passed: ${review.passed}, issues: ${review.issues.length})`,
+            },
+          ],
+        };
+        break;
+      }
+
+      case 'set_loop_review_result': {
+        const review = SetLoopReviewResultSchema.parse(args);
+
+        // Create a new loop review record
+        const reviewId = crypto.randomUUID();
+        db.prepare(`
+          INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          reviewId,
+          runId,
+          review.loopId,
+          review.taskId,
+          review.passed ? 1 : 0,
+          review.interpretedIntent ?? null,
+          review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
+        );
+
+        // Store review issues in unified context table with loop_id
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO context (run_id, type, content, task_id, loop_id, file, line)
+            VALUES (?, 'review_issue', ?, ?, ?, ?, ?)
+          `).run(
+            runId,
+            JSON.stringify({
+              issue_type: issue.type,
+              description: issue.description,
+              suggestion: issue.suggestion,
+              loop_review_id: reviewId,
+            }),
+            review.taskId,
+            review.loopId,
+            issue.file,
+            issue.line ?? null
+          );
+        }
+
+        result = {
+          content: [
+            {
+              type: 'text',
+              text: `Loop review result recorded (loopId: ${review.loopId}, passed: ${review.passed}, issues: ${review.issues.length})`,
+            },
+          ],
+        };
         break;
       }
 

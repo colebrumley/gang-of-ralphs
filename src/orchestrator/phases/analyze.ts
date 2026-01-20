@@ -69,9 +69,26 @@ export class AnalyzeIncompleteError extends Error {
 
 /**
  * Load codebase analysis from database after agent has written it via MCP tool.
+ * First checks the unified context table, then falls back to runs table for backwards compatibility.
  */
 export function loadAnalysisFromDB(runId: string): CodebaseAnalysis | null {
   const db = getDatabase();
+
+  // First try to load from unified context table
+  const contextRow = db
+    .prepare(
+      `SELECT content FROM context
+       WHERE run_id = ? AND type = 'codebase_analysis'
+       ORDER BY created_at DESC
+       LIMIT 1`
+    )
+    .get(runId) as { content: string } | undefined;
+
+  if (contextRow?.content) {
+    return SetCodebaseAnalysisSchema.parse(JSON.parse(contextRow.content));
+  }
+
+  // Fall back to runs table for backwards compatibility
   const row = db.prepare('SELECT codebase_analysis FROM runs WHERE id = ?').get(runId) as
     | {
         codebase_analysis: string | null;
