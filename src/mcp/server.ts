@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { writeContextToDb } from '../db/context.js';
+import { readContextFromDb, writeContextToDb } from '../db/context.js';
 import { getDatabase } from '../db/index.js';
 import {
   AddContextSchema,
@@ -12,6 +12,7 @@ import {
   CreateLoopSchema,
   FailTaskSchema,
   PersistLoopStateSchema,
+  ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
   SetCodebaseAnalysisSchema,
@@ -433,6 +434,33 @@ export function createMCPServer(runId: string, dbPath: string) {
           required: ['type', 'content'],
         },
       },
+      {
+        name: 'read_context',
+        description:
+          'Read context from the shared context store. Supports filtering by type, task, loop, file, and full-text search.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            types: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Filter by context types (optional)',
+            },
+            task_id: { type: 'string', description: 'Filter by task ID (optional)' },
+            loop_id: { type: 'string', description: 'Filter by loop ID (optional)' },
+            file: { type: 'string', description: 'Filter by file path (optional)' },
+            search: { type: 'string', description: 'Full-text search query (optional)' },
+            limit: { type: 'number', description: 'Max entries to return (default: 500)' },
+            offset: { type: 'number', description: 'Skip first N entries (default: 0)' },
+            order: {
+              type: 'string',
+              enum: ['asc', 'desc'],
+              description: 'Sort by created_at (default: desc)',
+            },
+          },
+          required: [],
+        },
+      },
     ],
   }));
 
@@ -780,6 +808,23 @@ ${scratchpad.blockers}
         result = {
           content: [{ type: 'text', text: `Context written (id: ${id}, type: ${ctx.type})` }],
         };
+        break;
+      }
+
+      case 'read_context': {
+        const opts = ReadContextSchema.parse(args);
+        const { entries, total } = readContextFromDb(db, {
+          runId,
+          types: opts.types,
+          taskId: opts.task_id,
+          loopId: opts.loop_id,
+          file: opts.file,
+          search: opts.search,
+          limit: opts.limit,
+          offset: opts.offset,
+          order: opts.order,
+        });
+        result = { content: [{ type: 'text', text: JSON.stringify({ entries, total }) }] };
         break;
       }
 

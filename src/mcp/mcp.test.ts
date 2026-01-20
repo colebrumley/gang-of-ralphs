@@ -208,4 +208,70 @@ describe('MCP Server', () => {
     assert.strictEqual(row.file, 'src/index.ts');
     assert.strictEqual(row.line, 42);
   });
+
+  test('read_context returns all context for run via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found auth'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'error',
+      'Build failed'
+    );
+
+    const { entries, total } = readContextFromDb(db, { runId: 'test-run' });
+    assert.strictEqual(total, 2);
+    assert.strictEqual(entries.length, 2);
+  });
+
+  test('read_context filters by type via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found auth'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'error',
+      'Build failed'
+    );
+
+    const { entries, total } = readContextFromDb(db, {
+      runId: 'test-run',
+      types: ['discovery'],
+    });
+    assert.strictEqual(total, 1);
+    assert.strictEqual(entries[0].type, 'discovery');
+  });
+
+  test('read_context supports full-text search via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found authentication middleware'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found database pool'
+    );
+
+    const { entries, total } = readContextFromDb(db, {
+      runId: 'test-run',
+      search: 'authentication',
+    });
+    assert.strictEqual(total, 1);
+    assert.ok(entries[0].content.includes('authentication'));
+  });
 });
