@@ -1,7 +1,6 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
 import {
-  AddContextSchema,
   AddPlanGroupSchema,
   CompleteTaskSchema,
   CreateLoopSchema,
@@ -10,8 +9,6 @@ import {
   ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
-  ReviewIssueSchema,
-  SetReviewResultSchema,
   UpdateLoopStatusSchema,
   WriteContextSchema,
   WriteTaskSchema,
@@ -177,159 +174,6 @@ describe('MCP Tool Schemas', () => {
           phase: 'invalid-phase',
         });
       });
-    });
-  });
-
-  describe('AddContextSchema', () => {
-    test('accepts discovery context', () => {
-      const result = AddContextSchema.parse({
-        type: 'discovery',
-        content: 'Found existing auth pattern',
-      });
-
-      assert.strictEqual(result.type, 'discovery');
-      assert.strictEqual(result.content, 'Found existing auth pattern');
-    });
-
-    test('accepts error context', () => {
-      const result = AddContextSchema.parse({
-        type: 'error',
-        content: 'Build failed: missing dependency',
-      });
-
-      assert.strictEqual(result.type, 'error');
-    });
-
-    test('accepts decision context', () => {
-      const result = AddContextSchema.parse({
-        type: 'decision',
-        content: 'Using JWT for auth',
-      });
-
-      assert.strictEqual(result.type, 'decision');
-    });
-
-    test('rejects invalid type', () => {
-      assert.throws(() => {
-        AddContextSchema.parse({
-          type: 'invalid',
-          content: 'Something',
-        });
-      });
-    });
-  });
-
-  describe('ReviewIssueSchema', () => {
-    test('accepts valid issue with line', () => {
-      const result = ReviewIssueSchema.parse({
-        taskId: 'task-1',
-        file: 'src/utils.ts',
-        line: 42,
-        type: 'over-engineering',
-        description: 'Unnecessary wrapper class',
-        suggestion: 'Use a plain function',
-      });
-
-      assert.strictEqual(result.file, 'src/utils.ts');
-      assert.strictEqual(result.line, 42);
-      assert.strictEqual(result.type, 'over-engineering');
-    });
-
-    test('accepts issue without line', () => {
-      const result = ReviewIssueSchema.parse({
-        taskId: 'task-1',
-        file: 'src/api.ts',
-        type: 'missing-error-handling',
-        description: 'No try-catch',
-        suggestion: 'Add error handling',
-      });
-
-      assert.strictEqual(result.line, undefined);
-    });
-
-    test('accepts all issue types', () => {
-      const types = [
-        'over-engineering',
-        'missing-error-handling',
-        'pattern-violation',
-        'dead-code',
-      ];
-      for (const type of types) {
-        const result = ReviewIssueSchema.parse({
-          taskId: 'task-1',
-          file: 'src/test.ts',
-          type,
-          description: 'Test issue',
-          suggestion: 'Fix it',
-        });
-        assert.strictEqual(result.type, type);
-      }
-    });
-  });
-
-  describe('SetReviewResultSchema', () => {
-    test('accepts passed review', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants to add a feature',
-        intentSatisfied: true,
-        passed: true,
-        issues: [],
-      });
-
-      assert.strictEqual(result.passed, true);
-      assert.strictEqual(result.intentSatisfied, true);
-      assert.strictEqual(result.interpretedIntent, 'User wants to add a feature');
-      assert.deepStrictEqual(result.issues, []);
-    });
-
-    test('accepts failed review with issues', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants clean code',
-        intentSatisfied: false,
-        passed: false,
-        issues: [
-          {
-            taskId: 'task-1',
-            file: 'src/main.ts',
-            type: 'dead-code',
-            description: 'Unused import',
-            suggestion: 'Remove it',
-          },
-        ],
-      });
-
-      assert.strictEqual(result.passed, false);
-      assert.strictEqual(result.intentSatisfied, false);
-      assert.strictEqual(result.issues.length, 1);
-    });
-
-    test('defaults issues to empty array', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants a working feature',
-        intentSatisfied: true,
-        passed: true,
-      });
-      assert.deepStrictEqual(result.issues, []);
-    });
-
-    test('accepts spec-intent-mismatch issue type', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants user-friendly error messages',
-        intentSatisfied: false,
-        passed: true,
-        issues: [
-          {
-            taskId: 'task-1',
-            file: 'src/form.tsx',
-            type: 'spec-intent-mismatch',
-            description: 'Error messages are technical codes',
-            suggestion: 'Use human-readable messages',
-          },
-        ],
-      });
-
-      assert.strictEqual(result.intentSatisfied, false);
-      assert.strictEqual(result.issues[0].type, 'spec-intent-mismatch');
     });
   });
 
