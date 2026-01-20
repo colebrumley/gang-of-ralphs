@@ -363,6 +363,7 @@ describe('buildIterationPrompt', () => {
     dependencies: [],
     status: 'pending' as const,
     estimatedIterations: 10,
+    assignedLoopId: null,
   };
 
   test('includes Iron Law verification section', () => {

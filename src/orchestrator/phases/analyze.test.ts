@@ -108,7 +108,9 @@ describe('Analyze Phase', () => {
     let dbPath: string;
 
     beforeEach(async () => {
-      tempDir = await mkdir(join(tmpdir(), `sq-test-analyze-${Date.now()}`), { recursive: true });
+      const dir = join(tmpdir(), `sq-test-analyze-${Date.now()}`);
+      await mkdir(dir, { recursive: true });
+      tempDir = dir;
       dbPath = join(tempDir, 'state.db');
       createDatabase(dbPath);
     });
