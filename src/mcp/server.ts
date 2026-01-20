@@ -580,34 +580,40 @@ export function createMCPServer(runId: string, dbPath: string) {
       case 'set_review_result': {
         const review = SetReviewResultSchema.parse(args);
 
-        // Clear previous run-level review issues from unified context table
-        db.prepare(
-          `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
-        ).run(runId);
+        // Use transaction to ensure atomicity of delete + inserts + update
+        const saveReviewResult = db.transaction(() => {
+          // Clear previous run-level review issues from unified context table
+          db.prepare(
+            `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
+          ).run(runId);
 
-        // Store structured review issues in unified context table
-        for (const issue of review.issues) {
-          db.prepare(`
+          // Store structured review issues in unified context table
+          const insertStmt = db.prepare(`
             INSERT INTO context (run_id, type, content, task_id, file, line)
             VALUES (?, 'review_issue', ?, ?, ?, ?)
-          `).run(
-            runId,
-            JSON.stringify({
-              issue_type: issue.type,
-              description: issue.description,
-              suggestion: issue.suggestion,
-            }),
-            issue.taskId ?? null,
-            issue.file,
-            issue.line ?? null
-          );
-        }
+          `);
+          for (const issue of review.issues) {
+            insertStmt.run(
+              runId,
+              JSON.stringify({
+                issue_type: issue.type,
+                description: issue.description,
+                suggestion: issue.suggestion,
+              }),
+              issue.taskId ?? null,
+              issue.file,
+              issue.line ?? null
+            );
+          }
 
-        // Update runs table for intent analysis
-        db.prepare(`
-          UPDATE runs SET pending_review = 0, interpreted_intent = ?, intent_satisfied = ?
-          WHERE id = ?
-        `).run(review.interpretedIntent ?? null, review.intentSatisfied ? 1 : 0, runId);
+          // Update runs table for intent analysis
+          db.prepare(`
+            UPDATE runs SET pending_review = 0, interpreted_intent = ?, intent_satisfied = ?
+            WHERE id = ?
+          `).run(review.interpretedIntent ?? null, review.intentSatisfied ? 1 : 0, runId);
+        });
+
+        saveReviewResult();
 
         result = {
           content: [
@@ -623,40 +629,46 @@ export function createMCPServer(runId: string, dbPath: string) {
       case 'set_loop_review_result': {
         const review = SetLoopReviewResultSchema.parse(args);
 
-        // Create a new loop review record
+        // Use transaction to ensure atomicity of loop_reviews insert + context inserts
         const reviewId = crypto.randomUUID();
-        db.prepare(`
-          INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          reviewId,
-          runId,
-          review.loopId,
-          review.taskId,
-          review.passed ? 1 : 0,
-          review.interpretedIntent ?? null,
-          review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
-        );
-
-        // Store review issues in unified context table with loop_id
-        for (const issue of review.issues) {
+        const saveLoopReviewResult = db.transaction(() => {
+          // Create a new loop review record
           db.prepare(`
+            INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            reviewId,
+            runId,
+            review.loopId,
+            review.taskId,
+            review.passed ? 1 : 0,
+            review.interpretedIntent ?? null,
+            review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
+          );
+
+          // Store review issues in unified context table with loop_id
+          const insertStmt = db.prepare(`
             INSERT INTO context (run_id, type, content, task_id, loop_id, file, line)
             VALUES (?, 'review_issue', ?, ?, ?, ?, ?)
-          `).run(
-            runId,
-            JSON.stringify({
-              issue_type: issue.type,
-              description: issue.description,
-              suggestion: issue.suggestion,
-              loop_review_id: reviewId,
-            }),
-            review.taskId,
-            review.loopId,
-            issue.file,
-            issue.line ?? null
-          );
-        }
+          `);
+          for (const issue of review.issues) {
+            insertStmt.run(
+              runId,
+              JSON.stringify({
+                issue_type: issue.type,
+                description: issue.description,
+                suggestion: issue.suggestion,
+                loop_review_id: reviewId,
+              }),
+              review.taskId,
+              review.loopId,
+              issue.file,
+              issue.line ?? null
+            );
+          }
+        });
+
+        saveLoopReviewResult();
 
         result = {
           content: [

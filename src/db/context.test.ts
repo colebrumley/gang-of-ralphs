@@ -193,6 +193,29 @@ describe('Context DB Helpers', () => {
       assert.strictEqual(entries.length, 0);
       assert.strictEqual(total, 0);
     });
+
+    it('falls back to LIKE search when FTS5 syntax fails', () => {
+      // FTS5 treats AND/OR/NOT as operators, which can cause syntax errors
+      // The function should fall back to LIKE search gracefully
+      const { entries } = readContextFromDb(getDatabase(), {
+        runId,
+        search: 'authentication AND', // Invalid FTS5 syntax (dangling AND)
+      });
+      // Should not throw, and should return results via LIKE fallback
+      assert.ok(Array.isArray(entries));
+    });
+
+    it('handles special characters in search via LIKE fallback', () => {
+      writeContextToDb(getDatabase(), {
+        runId,
+        type: 'discovery',
+        content: 'function() { return true; }',
+      });
+      // Parentheses are FTS5 grouping operators - might cause issues
+      const { entries } = readContextFromDb(getDatabase(), { runId, search: 'function()' });
+      // Should fall back to LIKE and find the content
+      assert.ok(entries.length >= 1);
+    });
   });
 
   describe('pruneContext', () => {

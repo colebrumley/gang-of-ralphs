@@ -4,6 +4,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { ANALYZE_PROMPT } from '../../agents/prompts.js';
 import { createAgentConfig } from '../../agents/spawn.js';
 import { getEffortConfig, getModelId } from '../../config/effort.js';
+import { writeContextToDb } from '../../db/context.js';
 import { getDatabase } from '../../db/index.js';
 import type { DebugTracer } from '../../debug/index.js';
 import { SetCodebaseAnalysisSchema } from '../../mcp/tools.js';
@@ -128,12 +129,19 @@ export async function executeAnalyze(
       summary: 'New project with no existing code. All functionality will be built from scratch.',
     };
 
-    // Store in database
+    // Store in database - write to both unified context table and runs table for consistency
     const db = getDatabase();
-    db.prepare('UPDATE runs SET codebase_analysis = ? WHERE id = ?').run(
-      JSON.stringify(emptyAnalysis),
-      state.runId
-    );
+    const analysisJson = JSON.stringify(emptyAnalysis);
+
+    // Write to unified context table (canonical source)
+    writeContextToDb(db, {
+      runId: state.runId,
+      type: 'codebase_analysis',
+      content: analysisJson,
+    });
+
+    // Also update runs table for backwards compatibility
+    db.prepare('UPDATE runs SET codebase_analysis = ? WHERE id = ?').run(analysisJson, state.runId);
 
     return {
       analysis: emptyAnalysis,

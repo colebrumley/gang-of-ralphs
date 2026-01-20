@@ -502,14 +502,17 @@ export function loadState(stateDir: string): OrchestratorState | null {
 
   // Load context from unified context table
   // Excludes scratchpad entries (agents read those directly via read_context MCP tool)
+  // Query with DESC order to ensure we get the most recent entries first, even if there
+  // are many old entries. Limit covers all types (5 types * 500 max each + buffer).
   const contextResult = readContextFromDb(db, {
     runId: run.id,
     types: ['discovery', 'error', 'decision', 'review_issue', 'codebase_analysis'],
-    limit: 2000,
-    order: 'asc',
+    limit: 3000,
+    order: 'desc',
   });
 
-  // Partition entries by type
+  // Partition entries by type, keeping only MAX_CONTEXT_ENTRIES_PER_TYPE per type
+  // Since entries are ordered DESC (newest first), we take from the beginning
   const allDiscoveries: string[] = [];
   const allErrors: string[] = [];
   const allDecisions: string[] = [];
@@ -519,44 +522,55 @@ export function loadState(stateDir: string): OrchestratorState | null {
   for (const entry of contextResult.entries) {
     switch (entry.type) {
       case 'discovery':
-        allDiscoveries.push(entry.content);
+        if (allDiscoveries.length < MAX_CONTEXT_ENTRIES_PER_TYPE) {
+          allDiscoveries.push(entry.content);
+        }
         break;
       case 'error':
-        allErrors.push(entry.content);
+        if (allErrors.length < MAX_CONTEXT_ENTRIES_PER_TYPE) {
+          allErrors.push(entry.content);
+        }
         break;
       case 'decision':
-        allDecisions.push(entry.content);
+        if (allDecisions.length < MAX_CONTEXT_ENTRIES_PER_TYPE) {
+          allDecisions.push(entry.content);
+        }
         break;
       case 'review_issue': {
-        // Parse JSON content: { issue_type, description, suggestion }
-        const parsed = JSON.parse(entry.content) as {
-          issue_type: ReviewIssueType;
-          description: string;
-          suggestion: string;
-        };
-        allReviewIssues.push({
-          taskId: entry.task_id ?? undefined,
-          file: entry.file ?? '',
-          line: entry.line ?? undefined,
-          type: parsed.issue_type,
-          description: parsed.description,
-          suggestion: parsed.suggestion,
-        });
+        if (allReviewIssues.length < MAX_REVIEW_ISSUES) {
+          // Parse JSON content: { issue_type, description, suggestion }
+          const parsed = JSON.parse(entry.content) as {
+            issue_type: ReviewIssueType;
+            description: string;
+            suggestion: string;
+          };
+          allReviewIssues.push({
+            taskId: entry.task_id ?? undefined,
+            file: entry.file ?? '',
+            line: entry.line ?? undefined,
+            type: parsed.issue_type,
+            description: parsed.description,
+            suggestion: parsed.suggestion,
+          });
+        }
         break;
       }
       case 'codebase_analysis':
-        // Most recent codebase_analysis wins (entries are ordered ASC, so last is newest)
-        codebaseAnalysisFromContext = entry.content;
+        // Most recent codebase_analysis wins (entries are ordered DESC, so first is newest)
+        if (codebaseAnalysisFromContext === null) {
+          codebaseAnalysisFromContext = entry.content;
+        }
         break;
     }
   }
 
-  // Limit entries per type to prevent unbounded memory growth
-  // Keep most recent entries (entries are ordered ASC by created_at, so slice from end)
-  const discoveries = allDiscoveries.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
-  const errors = allErrors.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
-  const decisions = allDecisions.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
-  const reviewIssues = allReviewIssues.slice(-MAX_REVIEW_ISSUES);
+  // Reverse arrays to restore chronological order (oldest first)
+  // We queried DESC to get most recent entries first, then limited during partitioning,
+  // but consumers expect oldest-first chronological order for display/processing
+  const discoveries = allDiscoveries.reverse();
+  const errors = allErrors.reverse();
+  const decisions = allDecisions.reverse();
+  const reviewIssues = allReviewIssues.reverse();
 
   // Prune old context entries from database to prevent unbounded storage growth
   pruneContext(db, run.id);

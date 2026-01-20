@@ -94,23 +94,48 @@ export function readContextFromDb(db: Database, opts: ReadContextOptions): ReadC
   let countQuery: string;
 
   if (search) {
-    query = `
-      SELECT c.* FROM context c
-      JOIN context_fts fts ON c.id = fts.rowid
-      WHERE ${whereClause}
-        AND context_fts MATCH ?
-      ORDER BY rank, c.created_at ${order.toUpperCase()}, c.id ${order.toUpperCase()}
-      LIMIT ? OFFSET ?
-    `;
-    countQuery = `
-      SELECT COUNT(*) as total FROM context c
-      JOIN context_fts fts ON c.id = fts.rowid
-      WHERE ${whereClause}
-        AND context_fts MATCH ?
-    `;
-    const entries = db.prepare(query).all(...params, search, limit, offset) as ContextEntry[];
-    const { total } = db.prepare(countQuery).get(...params, search) as { total: number };
-    return { entries, total };
+    // FTS5 has special query syntax - certain characters like (), *, ", AND, OR, NOT
+    // can cause syntax errors. We try FTS5 first, then fall back to LIKE if it fails.
+    try {
+      query = `
+        SELECT c.* FROM context c
+        JOIN context_fts fts ON c.id = fts.rowid
+        WHERE ${whereClause}
+          AND context_fts MATCH ?
+        ORDER BY rank, c.created_at ${order.toUpperCase()}, c.id ${order.toUpperCase()}
+        LIMIT ? OFFSET ?
+      `;
+      countQuery = `
+        SELECT COUNT(*) as total FROM context c
+        JOIN context_fts fts ON c.id = fts.rowid
+        WHERE ${whereClause}
+          AND context_fts MATCH ?
+      `;
+      const entries = db.prepare(query).all(...params, search, limit, offset) as ContextEntry[];
+      const { total } = db.prepare(countQuery).get(...params, search) as { total: number };
+      return { entries, total };
+    } catch {
+      // FTS5 query failed (likely due to special characters in search term)
+      // Fall back to simple LIKE search
+      query = `
+        SELECT * FROM context c
+        WHERE ${whereClause}
+          AND c.content LIKE ?
+        ORDER BY c.created_at ${order.toUpperCase()}, c.id ${order.toUpperCase()}
+        LIMIT ? OFFSET ?
+      `;
+      countQuery = `
+        SELECT COUNT(*) as total FROM context c
+        WHERE ${whereClause}
+          AND c.content LIKE ?
+      `;
+      const likePattern = `%${search}%`;
+      const entries = db
+        .prepare(query)
+        .all(...params, likePattern, limit, offset) as ContextEntry[];
+      const { total } = db.prepare(countQuery).get(...params, likePattern) as { total: number };
+      return { entries, total };
+    }
   }
 
   query = `
