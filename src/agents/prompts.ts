@@ -21,10 +21,29 @@ If you haven't run verification in this iteration, you cannot claim completion.
 
 ## How to Work
 
-1. Read the scratchpad below to understand current state
+1. Read your scratchpad history to understand current state
 2. Make ONE small change (create a file, add a function, fix a failing test)
 3. Run tests to verify your change
-4. Use \`write_scratchpad\` tool with what you did and what's next
+4. Use \`write_context\` tool to save progress:
+   \`\`\`
+   write_context({
+     type: "scratchpad",
+     loop_id: "{{loopId}}",
+     content: JSON.stringify({
+       iteration: N,
+       done: "what you completed",
+       test_status: "pass/fail + output",
+       next_step: "what to do next",
+       blockers: "any blockers or 'none'",
+       attempted: ["approach1", "approach2"]
+     })
+   })
+   \`\`\`
+
+Before each iteration, read your history:
+\`read_context({ types: ["scratchpad"], loop_id: "{{loopId}}", limit: 5, order: "desc" })\`
+
+Check attempted approaches - don't repeat failed strategies.
 
 Write/run a failing test before implementing new functionality.
 If stuck after 2-3 attempts at the same problem, output TASK_STUCK.
@@ -81,25 +100,28 @@ You are a codebase analyst. Explore the project to understand what already exist
 - **Patterns**: Coding conventions, architectural patterns, naming conventions
 
 ## How to Report Results
-Use the \`set_codebase_analysis\` MCP tool when you finish analyzing:
+Use the \`write_context\` MCP tool when you finish analyzing:
 
 \`\`\`
-set_codebase_analysis({
-  projectType: "TypeScript Node.js CLI application",
-  techStack: ["TypeScript", "Node.js", "Commander", "SQLite"],
-  directoryStructure: "src/ contains core code organized by feature, tests colocated with source",
-  existingFeatures: [
-    "CLI argument parsing with --spec and --effort flags",
-    "SQLite state persistence",
-    "Phase-based orchestration (enumerate, plan, build, review)"
-  ],
-  entryPoints: ["src/cli.ts", "src/index.ts"],
-  patterns: [
-    "MCP tools for agent-to-database communication",
-    "Zod schemas for validation",
-    "Phase-specific agent configs"
-  ],
-  summary: "An AI orchestration system that coordinates multiple Claude agents to implement software from specifications. Uses a state machine with distinct phases."
+write_context({
+  type: "codebase_analysis",
+  content: JSON.stringify({
+    projectType: "TypeScript Node.js CLI application",
+    techStack: ["TypeScript", "Node.js", "Commander", "SQLite"],
+    directoryStructure: "src/ contains core code organized by feature, tests colocated with source",
+    existingFeatures: [
+      "CLI argument parsing with --spec and --effort flags",
+      "SQLite state persistence",
+      "Phase-based orchestration (enumerate, plan, build, review)"
+    ],
+    entryPoints: ["src/cli.ts", "src/index.ts"],
+    patterns: [
+      "MCP tools for agent-to-database communication",
+      "Zod schemas for validation",
+      "Phase-specific agent configs"
+    ],
+    summary: "An AI orchestration system that coordinates multiple Claude agents to implement software from specifications. Uses a state machine with distinct phases."
+  })
 })
 \`\`\`
 

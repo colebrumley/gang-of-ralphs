@@ -1,23 +1,23 @@
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { readContextFromDb, writeContextToDb } from '../db/context.js';
 import { getDatabase } from '../db/index.js';
 import {
-  AddContextSchema,
   AddPlanGroupSchema,
   CompleteTaskSchema,
   CreateLoopSchema,
   FailTaskSchema,
   PersistLoopStateSchema,
+  ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
-  SetCodebaseAnalysisSchema,
   SetLoopReviewResultSchema,
   SetReviewResultSchema,
   UpdateLoopStatusSchema,
-  WriteScratchpadSchema,
+  WriteContextSchema,
   WriteTaskSchema,
 } from './tools.js';
 
@@ -156,118 +156,6 @@ export function createMCPServer(runId: string, dbPath: string) {
         },
       },
       {
-        name: 'add_context',
-        description: 'Add a discovery, error, or decision to context',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            type: {
-              type: 'string',
-              enum: ['discovery', 'error', 'decision'],
-              description: 'Type of context entry',
-            },
-            content: { type: 'string', description: 'The context content' },
-          },
-          required: ['type', 'content'],
-        },
-      },
-      {
-        name: 'set_review_result',
-        description: 'Record the result of a review phase',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            interpretedIntent: {
-              type: 'string',
-              description:
-                'In 1-2 sentences, what was the user actually trying to accomplish? What unstated expectations would be reasonable?',
-            },
-            intentSatisfied: {
-              type: 'boolean',
-              description:
-                'Does the implementation serve the interpreted intent, not just the literal spec words?',
-            },
-            passed: { type: 'boolean', description: 'Whether review passed' },
-            issues: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  taskId: { type: 'string', description: 'ID of the task with the issue' },
-                  file: { type: 'string', description: 'File path where the issue was found' },
-                  line: { type: 'number', description: 'Line number of the issue' },
-                  type: {
-                    type: 'string',
-                    enum: [
-                      'over-engineering',
-                      'missing-error-handling',
-                      'pattern-violation',
-                      'dead-code',
-                      'spec-intent-mismatch',
-                    ],
-                    description: 'Type of issue',
-                  },
-                  description: { type: 'string', description: 'Description of the issue' },
-                  suggestion: { type: 'string', description: 'Suggested fix' },
-                },
-                required: ['taskId', 'file', 'type', 'description', 'suggestion'],
-              },
-              description: 'Structured review issues found',
-            },
-          },
-          required: ['interpretedIntent', 'intentSatisfied', 'passed'],
-        },
-      },
-      {
-        name: 'set_loop_review_result',
-        description: 'Report review results for a specific loop',
-        inputSchema: {
-          type: 'object' as const,
-          properties: {
-            loopId: { type: 'string', description: 'The loop being reviewed' },
-            taskId: {
-              type: 'string',
-              description: 'The task that was reviewed (optional for checkpoint reviews)',
-            },
-            passed: { type: 'boolean', description: 'Whether review passed' },
-            interpretedIntent: {
-              type: 'string',
-              description: 'What the task was really trying to accomplish',
-            },
-            intentSatisfied: {
-              type: 'boolean',
-              description: 'Does the implementation serve the interpreted intent?',
-            },
-            issues: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  file: { type: 'string', description: 'File path where the issue was found' },
-                  line: { type: 'number', description: 'Line number of the issue' },
-                  type: {
-                    type: 'string',
-                    enum: [
-                      'over-engineering',
-                      'missing-error-handling',
-                      'pattern-violation',
-                      'dead-code',
-                      'spec-intent-mismatch',
-                    ],
-                    description: 'Type of issue',
-                  },
-                  description: { type: 'string', description: 'Description of the issue' },
-                  suggestion: { type: 'string', description: 'Suggested fix' },
-                },
-                required: ['file', 'type', 'description', 'suggestion'],
-              },
-              description: 'Structured review issues found',
-            },
-          },
-          required: ['loopId', 'passed'],
-        },
-      },
-      {
         name: 'create_loop',
         description: 'Create a new execution loop for parallel task processing',
         inputSchema: {
@@ -335,68 +223,155 @@ export function createMCPServer(runId: string, dbPath: string) {
         },
       },
       {
-        name: 'set_codebase_analysis',
-        description: 'Store the codebase analysis results from the analyze phase',
+        name: 'write_context',
+        description:
+          'Write context to the shared context store. Use for discoveries, errors, decisions, review issues, scratchpad entries, and codebase analysis.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            projectType: {
+            type: {
               type: 'string',
-              description: 'Type of project (e.g., "TypeScript Node.js CLI")',
+              enum: [
+                'discovery',
+                'error',
+                'decision',
+                'review_issue',
+                'scratchpad',
+                'codebase_analysis',
+              ],
+              description: 'The type of context being written',
             },
-            techStack: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Technologies/frameworks used',
-            },
-            directoryStructure: {
+            content: {
               type: 'string',
-              description: 'Brief description of code organization',
+              description:
+                'The content. Plain string for simple types, JSON string for structured types',
             },
-            existingFeatures: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Features the codebase already implements',
-            },
-            entryPoints: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Main entry point files',
-            },
-            patterns: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Key patterns and conventions observed',
-            },
-            summary: {
-              type: 'string',
-              description: '2-3 sentence summary of what the codebase does',
-            },
+            task_id: { type: 'string', description: 'Associated task ID (optional)' },
+            loop_id: { type: 'string', description: 'Associated loop ID (optional)' },
+            file: { type: 'string', description: 'Associated file path (optional)' },
+            line: { type: 'number', description: 'Associated line number (optional)' },
           },
-          required: [
-            'projectType',
-            'techStack',
-            'directoryStructure',
-            'existingFeatures',
-            'entryPoints',
-            'patterns',
-            'summary',
-          ],
+          required: ['type', 'content'],
         },
       },
       {
-        name: 'write_scratchpad',
-        description: 'Write iteration scratchpad for handoff to next iteration',
+        name: 'read_context',
+        description:
+          'Read context from the shared context store. Supports filtering by type, task, loop, file, and full-text search.',
         inputSchema: {
           type: 'object' as const,
           properties: {
-            loopId: { type: 'string', description: 'The loop this scratchpad belongs to' },
-            done: { type: 'string', description: 'What you completed this iteration' },
-            testStatus: { type: 'string', description: 'Test results (pass/fail + key output)' },
-            nextStep: { type: 'string', description: 'What the next iteration should do' },
-            blockers: { type: 'string', description: 'Any blockers, or "none"' },
+            types: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Filter by context types (optional)',
+            },
+            task_id: { type: 'string', description: 'Filter by task ID (optional)' },
+            loop_id: { type: 'string', description: 'Filter by loop ID (optional)' },
+            file: { type: 'string', description: 'Filter by file path (optional)' },
+            search: { type: 'string', description: 'Full-text search query (optional)' },
+            limit: { type: 'number', description: 'Max entries to return (default: 500)' },
+            offset: { type: 'number', description: 'Skip first N entries (default: 0)' },
+            order: {
+              type: 'string',
+              enum: ['asc', 'desc'],
+              description: 'Sort by created_at (default: desc)',
+            },
           },
-          required: ['loopId', 'done', 'testStatus', 'nextStep', 'blockers'],
+          required: [],
+        },
+      },
+      {
+        name: 'set_review_result',
+        description:
+          'Record the result of a run-level review. Use this after completing review of build work.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            interpretedIntent: {
+              type: 'string',
+              description: 'What the user was actually trying to accomplish',
+            },
+            intentSatisfied: {
+              type: 'boolean',
+              description: 'Does the implementation serve this intent?',
+            },
+            passed: { type: 'boolean', description: 'Whether the review passed' },
+            issues: {
+              type: 'array',
+              description: 'List of issues found',
+              items: {
+                type: 'object',
+                properties: {
+                  taskId: { type: 'string', description: 'Task ID this issue relates to' },
+                  file: { type: 'string', description: 'File path where issue was found' },
+                  line: { type: 'number', description: 'Line number of issue' },
+                  type: {
+                    type: 'string',
+                    enum: [
+                      'over-engineering',
+                      'missing-error-handling',
+                      'pattern-violation',
+                      'dead-code',
+                      'spec-intent-mismatch',
+                    ],
+                    description: 'Issue type',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'How to fix the issue' },
+                },
+                required: ['file', 'type', 'description', 'suggestion'],
+              },
+            },
+          },
+          required: ['passed'],
+        },
+      },
+      {
+        name: 'set_loop_review_result',
+        description:
+          'Record the result of a per-loop review. Use this after reviewing work from a specific loop.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            loopId: { type: 'string', description: 'Loop ID being reviewed' },
+            taskId: { type: 'string', description: 'Task ID being reviewed' },
+            passed: { type: 'boolean', description: 'Whether the review passed' },
+            interpretedIntent: {
+              type: 'string',
+              description: 'What the task was trying to accomplish',
+            },
+            intentSatisfied: {
+              type: 'boolean',
+              description: 'Does the implementation serve this intent?',
+            },
+            issues: {
+              type: 'array',
+              description: 'List of issues found',
+              items: {
+                type: 'object',
+                properties: {
+                  file: { type: 'string', description: 'File path where issue was found' },
+                  line: { type: 'number', description: 'Line number of issue' },
+                  type: {
+                    type: 'string',
+                    enum: [
+                      'over-engineering',
+                      'missing-error-handling',
+                      'pattern-violation',
+                      'dead-code',
+                      'spec-intent-mismatch',
+                    ],
+                    description: 'Issue type',
+                  },
+                  description: { type: 'string', description: 'Description of the issue' },
+                  suggestion: { type: 'string', description: 'How to fix the issue' },
+                },
+                required: ['file', 'type', 'description', 'suggestion'],
+              },
+            },
+          },
+          required: ['loopId', 'taskId', 'passed'],
         },
       },
     ],
@@ -444,7 +419,7 @@ export function createMCPServer(runId: string, dbPath: string) {
         `).run(taskId, runId);
         // Also log the failure as a context entry
         db.prepare(`
-          INSERT INTO context_entries (run_id, entry_type, content)
+          INSERT INTO context (run_id, type, content)
           VALUES (?, 'error', ?)
         `).run(runId, `Task ${taskId} failed: ${reason}`);
         result = { content: [{ type: 'text', text: `Task ${taskId} marked as failed` }] };
@@ -488,112 +463,6 @@ export function createMCPServer(runId: string, dbPath: string) {
         `).run(runId, phase, costUsd);
         result = {
           content: [{ type: 'text', text: `Cost $${costUsd} recorded for phase ${phase}` }],
-        };
-        break;
-      }
-
-      case 'add_context': {
-        const ctx = AddContextSchema.parse(args);
-        db.prepare(`
-          INSERT INTO context_entries (run_id, entry_type, content)
-          VALUES (?, ?, ?)
-        `).run(runId, ctx.type, ctx.content);
-        result = { content: [{ type: 'text', text: `Context ${ctx.type} added` }] };
-        break;
-      }
-
-      case 'set_review_result': {
-        const review = SetReviewResultSchema.parse(args);
-        // Clear previous review issues for this run (only run-level reviews, not loop reviews)
-        db.prepare(`
-          DELETE FROM review_issues WHERE run_id = ? AND loop_id IS NULL
-        `).run(runId);
-        // Store structured review issues
-        for (const issue of review.issues) {
-          db.prepare(`
-            INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            runId,
-            issue.taskId,
-            issue.file,
-            issue.line ?? null,
-            issue.type,
-            issue.description,
-            issue.suggestion
-          );
-        }
-        // Update pending_review and store intent analysis on runs
-        db.prepare(`
-          UPDATE runs SET
-            pending_review = 0,
-            interpreted_intent = ?,
-            intent_satisfied = ?
-          WHERE id = ?
-        `).run(review.interpretedIntent, review.intentSatisfied ? 1 : 0, runId);
-
-        // Determine final pass/fail: must pass both technical review AND intent check
-        const finalPassed = review.passed && review.intentSatisfied;
-        result = {
-          content: [
-            {
-              type: 'text',
-              text: `Review result: ${finalPassed ? 'PASSED' : 'FAILED'} (${review.issues.length} issues, intent ${review.intentSatisfied ? 'satisfied' : 'NOT satisfied'})`,
-            },
-          ],
-        };
-        break;
-      }
-
-      case 'set_loop_review_result': {
-        const review = SetLoopReviewResultSchema.parse(args);
-        const reviewId = crypto.randomUUID();
-
-        // Insert the loop review record
-        db.prepare(`
-          INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied, cost_usd)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(
-          reviewId,
-          runId,
-          review.loopId,
-          review.taskId ?? null,
-          review.passed ? 1 : 0,
-          review.interpretedIntent ?? null,
-          review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
-        );
-
-        // Store structured review issues with loop context
-        for (const issue of review.issues) {
-          db.prepare(`
-            INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion, loop_id, loop_review_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            runId,
-            review.taskId ?? 'checkpoint',
-            issue.file,
-            issue.line ?? null,
-            issue.type,
-            issue.description,
-            issue.suggestion,
-            review.loopId,
-            reviewId
-          );
-        }
-
-        const intentStatus =
-          review.intentSatisfied != null
-            ? review.intentSatisfied
-              ? 'satisfied'
-              : 'NOT satisfied'
-            : 'not evaluated';
-        result = {
-          content: [
-            {
-              type: 'text',
-              text: `Loop review ${reviewId}: ${review.passed ? 'PASSED' : 'FAILED'} (${review.issues.length} issues, intent ${intentStatus})`,
-            },
-          ],
         };
         break;
       }
@@ -674,61 +543,129 @@ export function createMCPServer(runId: string, dbPath: string) {
         break;
       }
 
-      case 'set_codebase_analysis': {
-        const analysis = SetCodebaseAnalysisSchema.parse(args);
-        db.prepare(`
-          UPDATE runs SET codebase_analysis = ? WHERE id = ?
-        `).run(JSON.stringify(analysis), runId);
+      case 'write_context': {
+        const ctx = WriteContextSchema.parse(args);
+        const { id } = writeContextToDb(db, {
+          runId,
+          type: ctx.type,
+          content: ctx.content,
+          taskId: ctx.task_id,
+          loopId: ctx.loop_id,
+          file: ctx.file,
+          line: ctx.line,
+        });
         result = {
-          content: [{ type: 'text', text: `Codebase analysis stored: ${analysis.projectType}` }],
+          content: [{ type: 'text', text: `Context written (id: ${id}, type: ${ctx.type})` }],
         };
         break;
       }
 
-      case 'write_scratchpad': {
-        const scratchpad = WriteScratchpadSchema.parse(args);
+      case 'read_context': {
+        const opts = ReadContextSchema.parse(args);
+        const { entries, total } = readContextFromDb(db, {
+          runId,
+          types: opts.types,
+          taskId: opts.task_id,
+          loopId: opts.loop_id,
+          file: opts.file,
+          search: opts.search,
+          limit: opts.limit,
+          offset: opts.offset,
+          order: opts.order,
+        });
+        result = { content: [{ type: 'text', text: JSON.stringify({ entries, total }) }] };
+        break;
+      }
 
-        // Look up worktree path for this loop
-        const loopRow = db
-          .prepare(`
-          SELECT worktree_path FROM loops WHERE id = ?
-        `)
-          .get(scratchpad.loopId) as { worktree_path: string | null } | undefined;
+      case 'set_review_result': {
+        const review = SetReviewResultSchema.parse(args);
 
-        let scratchpadPath: string;
-        if (loopRow?.worktree_path) {
-          // Write to worktree
-          scratchpadPath = join(loopRow.worktree_path, '.sq-scratchpad.md');
-        } else {
-          // Write to state dir
-          const scratchpadDir = join(dirname(dbPath), 'scratchpads');
-          if (!existsSync(scratchpadDir)) {
-            mkdirSync(scratchpadDir, { recursive: true });
-          }
-          scratchpadPath = join(scratchpadDir, `${scratchpad.loopId}.md`);
+        // Clear previous run-level review issues from unified context table
+        db.prepare(
+          `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
+        ).run(runId);
+
+        // Store structured review issues in unified context table
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO context (run_id, type, content, task_id, file, line)
+            VALUES (?, 'review_issue', ?, ?, ?, ?)
+          `).run(
+            runId,
+            JSON.stringify({
+              issue_type: issue.type,
+              description: issue.description,
+              suggestion: issue.suggestion,
+            }),
+            issue.taskId ?? null,
+            issue.file,
+            issue.line ?? null
+          );
         }
 
-        const content = `# Iteration Scratchpad
+        // Update runs table for intent analysis
+        db.prepare(`
+          UPDATE runs SET pending_review = 0, interpreted_intent = ?, intent_satisfied = ?
+          WHERE id = ?
+        `).run(review.interpretedIntent ?? null, review.intentSatisfied ? 1 : 0, runId);
 
-## Done this iteration
-${scratchpad.done}
+        result = {
+          content: [
+            {
+              type: 'text',
+              text: `Review result recorded (passed: ${review.passed}, issues: ${review.issues.length})`,
+            },
+          ],
+        };
+        break;
+      }
 
-## Test status
-${scratchpad.testStatus}
+      case 'set_loop_review_result': {
+        const review = SetLoopReviewResultSchema.parse(args);
 
-## Next step
-${scratchpad.nextStep}
+        // Create a new loop review record
+        const reviewId = crypto.randomUUID();
+        db.prepare(`
+          INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          reviewId,
+          runId,
+          review.loopId,
+          review.taskId,
+          review.passed ? 1 : 0,
+          review.interpretedIntent ?? null,
+          review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
+        );
 
-## Blockers
-${scratchpad.blockers}
-`;
-
-        try {
-          writeFileSync(scratchpadPath, content, 'utf-8');
-          result = { content: [{ type: 'text', text: `Scratchpad written to ${scratchpadPath}` }] };
-        } catch (e) {
-          result = { content: [{ type: 'text', text: `Failed to write scratchpad: ${e}` }] };
+        // Store review issues in unified context table with loop_id
+        for (const issue of review.issues) {
+          db.prepare(`
+            INSERT INTO context (run_id, type, content, task_id, loop_id, file, line)
+            VALUES (?, 'review_issue', ?, ?, ?, ?, ?)
+          `).run(
+            runId,
+            JSON.stringify({
+              issue_type: issue.type,
+              description: issue.description,
+              suggestion: issue.suggestion,
+              loop_review_id: reviewId,
+            }),
+            review.taskId,
+            review.loopId,
+            issue.file,
+            issue.line ?? null
+          );
         }
+
+        result = {
+          content: [
+            {
+              type: 'text',
+              text: `Loop review result recorded (loopId: ${review.loopId}, passed: ${review.passed}, issues: ${review.issues.length})`,
+            },
+          ],
+        };
         break;
       }
 

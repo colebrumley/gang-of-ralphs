@@ -37,82 +37,6 @@ export const RecordCostSchema = z.object({
     .describe('Phase that incurred this cost'),
 });
 
-export const AddContextSchema = z.object({
-  type: z.enum(['discovery', 'error', 'decision']).describe('Type of context entry'),
-  content: z.string().describe('The context content'),
-});
-
-export const ReviewIssueSchema = z.object({
-  taskId: z
-    .string()
-    .optional()
-    .describe('ID of the task with the issue (omit for cross-task architecture concerns)'),
-  file: z.string().describe('File path where the issue was found'),
-  line: z.number().optional().describe('Line number of the issue'),
-  type: z
-    .enum([
-      'over-engineering',
-      'missing-error-handling',
-      'pattern-violation',
-      'dead-code',
-      'spec-intent-mismatch',
-      'architecture-concern',
-    ])
-    .describe('Type of issue'),
-  description: z.string().describe('Description of the issue'),
-  suggestion: z.string().describe('Suggested fix'),
-});
-
-export const SetReviewResultSchema = z.object({
-  interpretedIntent: z
-    .string()
-    .describe(
-      'In 1-2 sentences, what was the user actually trying to accomplish? What unstated expectations would be reasonable?'
-    ),
-  intentSatisfied: z
-    .boolean()
-    .describe(
-      'Does the implementation serve the interpreted intent, not just the literal spec words?'
-    ),
-  passed: z.boolean().describe('Whether review passed'),
-  issues: z.array(ReviewIssueSchema).default([]).describe('Structured review issues found'),
-});
-
-export const LoopReviewIssueSchema = z.object({
-  file: z.string().describe('File path where the issue was found'),
-  line: z.number().optional().describe('Line number of the issue'),
-  type: z
-    .enum([
-      'over-engineering',
-      'missing-error-handling',
-      'pattern-violation',
-      'dead-code',
-      'spec-intent-mismatch',
-      'architecture-concern',
-    ])
-    .describe('Type of issue'),
-  description: z.string().describe('Description of the issue'),
-  suggestion: z.string().describe('Suggested fix'),
-});
-
-export const SetLoopReviewResultSchema = z.object({
-  loopId: z.string().describe('The loop being reviewed'),
-  taskId: z
-    .string()
-    .optional()
-    .describe('The task that was reviewed (optional for checkpoint reviews)'),
-  passed: z.boolean().describe('Whether review passed'),
-  interpretedIntent: z
-    .string()
-    .optional()
-    .describe('What the task was really trying to accomplish'),
-  intentSatisfied: z
-    .boolean()
-    .optional()
-    .describe('Does the implementation serve the interpreted intent?'),
-  issues: z.array(LoopReviewIssueSchema).default([]).describe('Structured review issues found'),
-});
-
 export const CreateLoopSchema = z.object({
   taskIds: z.array(z.string()).describe('Task IDs to assign to this loop'),
   maxIterations: z.number().describe('Maximum iterations before stopping'),
@@ -148,15 +72,91 @@ export const SetCodebaseAnalysisSchema = z.object({
   summary: z.string(),
 });
 
-export const WriteScratchpadSchema = z.object({
-  loopId: z.string().describe('The loop this scratchpad belongs to'),
-  done: z.string().describe('What you completed this iteration'),
-  testStatus: z.string().describe('Test results (pass/fail + key output)'),
-  nextStep: z.string().describe('What the next iteration should do'),
-  blockers: z.string().describe('Any blockers, or "none"'),
+// Review tool schemas
+export const ReviewIssueSchema = z.object({
+  taskId: z.string().optional().describe('Task ID this issue relates to'),
+  file: z.string().describe('File path where issue was found'),
+  line: z.number().optional().describe('Line number of issue'),
+  type: z
+    .enum([
+      'over-engineering',
+      'missing-error-handling',
+      'pattern-violation',
+      'dead-code',
+      'spec-intent-mismatch',
+    ])
+    .describe('Issue type'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('How to fix the issue'),
 });
 
-export type WriteScratchpad = z.infer<typeof WriteScratchpadSchema>;
+export const SetReviewResultSchema = z.object({
+  interpretedIntent: z
+    .string()
+    .optional()
+    .describe('What the user was actually trying to accomplish'),
+  intentSatisfied: z.boolean().optional().describe('Does the implementation serve this intent?'),
+  passed: z.boolean().describe('Whether the review passed'),
+  issues: z.array(ReviewIssueSchema).default([]).describe('List of issues found'),
+});
+
+export const LoopReviewIssueSchema = z.object({
+  file: z.string().describe('File path where issue was found'),
+  line: z.number().optional().describe('Line number of issue'),
+  type: z
+    .enum([
+      'over-engineering',
+      'missing-error-handling',
+      'pattern-violation',
+      'dead-code',
+      'spec-intent-mismatch',
+    ])
+    .describe('Issue type'),
+  description: z.string().describe('Description of the issue'),
+  suggestion: z.string().describe('How to fix the issue'),
+});
+
+export const SetLoopReviewResultSchema = z.object({
+  loopId: z.string().describe('Loop ID being reviewed'),
+  taskId: z.string().describe('Task ID being reviewed'),
+  passed: z.boolean().describe('Whether the review passed'),
+  interpretedIntent: z.string().optional().describe('What the task was trying to accomplish'),
+  intentSatisfied: z.boolean().optional().describe('Does the implementation serve this intent?'),
+  issues: z.array(LoopReviewIssueSchema).default([]).describe('List of issues found'),
+});
+
+export type ReviewIssue = z.infer<typeof ReviewIssueSchema>;
+export type SetReviewResult = z.infer<typeof SetReviewResultSchema>;
+export type LoopReviewIssue = z.infer<typeof LoopReviewIssueSchema>;
+export type SetLoopReviewResult = z.infer<typeof SetLoopReviewResultSchema>;
+
+export const WriteContextSchema = z.object({
+  type: z
+    .enum(['discovery', 'error', 'decision', 'review_issue', 'scratchpad', 'codebase_analysis'])
+    .describe('The type of context being written'),
+  content: z
+    .string()
+    .describe('The content. Plain string for simple types, JSON string for structured types'),
+  task_id: z.string().optional().describe('Associated task ID'),
+  loop_id: z.string().optional().describe('Associated loop ID'),
+  file: z.string().optional().describe('Associated file path'),
+  line: z.number().optional().describe('Associated line number'),
+});
+
+export type WriteContext = z.infer<typeof WriteContextSchema>;
+
+export const ReadContextSchema = z.object({
+  types: z.array(z.string()).optional().describe('Filter by context types'),
+  task_id: z.string().optional().describe('Filter by task ID'),
+  loop_id: z.string().optional().describe('Filter by loop ID'),
+  file: z.string().optional().describe('Filter by file path'),
+  search: z.string().optional().describe('Full-text search query'),
+  limit: z.number().default(500).describe('Max entries to return'),
+  offset: z.number().default(0).describe('Skip first N entries'),
+  order: z.enum(['asc', 'desc']).default('desc').describe('Sort by created_at'),
+});
+
+export type ReadContext = z.infer<typeof ReadContextSchema>;
 
 export type WriteTask = z.infer<typeof WriteTaskSchema>;
 export type CompleteTask = z.infer<typeof CompleteTaskSchema>;
@@ -164,11 +164,6 @@ export type FailTask = z.infer<typeof FailTaskSchema>;
 export type AddPlanGroup = z.infer<typeof AddPlanGroupSchema>;
 export type UpdateLoopStatus = z.infer<typeof UpdateLoopStatusSchema>;
 export type RecordCost = z.infer<typeof RecordCostSchema>;
-export type AddContext = z.infer<typeof AddContextSchema>;
-export type ReviewIssueMCP = z.infer<typeof ReviewIssueSchema>;
-export type SetReviewResult = z.infer<typeof SetReviewResultSchema>;
-export type LoopReviewIssue = z.infer<typeof LoopReviewIssueSchema>;
-export type SetLoopReviewResult = z.infer<typeof SetLoopReviewResultSchema>;
 export type CreateLoop = z.infer<typeof CreateLoopSchema>;
 export type PersistLoopState = z.infer<typeof PersistLoopStateSchema>;
 export type RecordPhaseCost = z.infer<typeof RecordPhaseCostSchema>;

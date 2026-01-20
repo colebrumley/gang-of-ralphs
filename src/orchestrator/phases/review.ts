@@ -134,6 +134,7 @@ async function runReviewAgent(
 
 /**
  * Load review results from database after agent has written them via MCP set_review_result.
+ * Reads from unified context table for review issues.
  */
 export function loadReviewResultFromDB(runId: string): {
   passed: boolean;
@@ -143,24 +144,36 @@ export function loadReviewResultFromDB(runId: string): {
 } {
   const db = getDatabase();
 
-  // Load review issues
-  const issueRows = db.prepare('SELECT * FROM review_issues WHERE run_id = ?').all(runId) as Array<{
-    task_id: string;
-    file: string;
+  // Load review issues from unified context table (run-level issues have no loop_id)
+  const issueRows = db
+    .prepare(
+      `SELECT content, task_id, file, line
+       FROM context
+       WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL
+       ORDER BY created_at DESC`
+    )
+    .all(runId) as Array<{
+    content: string;
+    task_id: string | null;
+    file: string | null;
     line: number | null;
-    type: ReviewIssueType;
-    description: string;
-    suggestion: string;
   }>;
 
-  const issues: ReviewIssue[] = issueRows.map((row) => ({
-    taskId: row.task_id,
-    file: row.file,
-    line: row.line ?? undefined,
-    type: row.type,
-    description: row.description,
-    suggestion: row.suggestion,
-  }));
+  const issues: ReviewIssue[] = issueRows.map((row) => {
+    const parsed = JSON.parse(row.content) as {
+      issue_type: ReviewIssueType;
+      description: string;
+      suggestion: string;
+    };
+    return {
+      taskId: row.task_id ?? undefined,
+      file: row.file ?? '',
+      line: row.line ?? undefined,
+      type: parsed.issue_type,
+      description: parsed.description,
+      suggestion: parsed.suggestion,
+    };
+  });
 
   // Load intent analysis from runs table
   const run = db
@@ -715,6 +728,7 @@ export interface LoopReviewResult {
 
 /**
  * Load the most recent loop review result from the database.
+ * Reads from unified context table for review issues.
  */
 export function loadLoopReviewResultFromDB(
   runId: string,
@@ -750,30 +764,44 @@ export function loadLoopReviewResultFromDB(
     return { reviewId: null, passed: false, issues: [] };
   }
 
-  // Load issues for this loop review
+  // Load issues for this loop from unified context table
+  // Filter by loop_id and look for issues that reference this review
   const issueRows = db
     .prepare(
-      `SELECT task_id, file, line, type, description, suggestion
-       FROM review_issues
-       WHERE loop_review_id = ?`
+      `SELECT content, task_id, file, line
+       FROM context
+       WHERE run_id = ? AND type = 'review_issue' AND loop_id = ?
+       ORDER BY created_at DESC`
     )
-    .all(review.id) as Array<{
-    task_id: string;
-    file: string;
+    .all(runId, loopId) as Array<{
+    content: string;
+    task_id: string | null;
+    file: string | null;
     line: number | null;
-    type: ReviewIssueType;
-    description: string;
-    suggestion: string;
   }>;
 
-  const issues: ReviewIssue[] = issueRows.map((row) => ({
-    taskId: row.task_id,
-    file: row.file,
-    line: row.line ?? undefined,
-    type: row.type,
-    description: row.description,
-    suggestion: row.suggestion,
-  }));
+  // Parse issues from the most recent review (filter by loop_review_id in content)
+  const issues: ReviewIssue[] = [];
+  for (const row of issueRows) {
+    const parsed = JSON.parse(row.content) as {
+      issue_type: ReviewIssueType;
+      description: string;
+      suggestion: string;
+      loop_review_id?: string;
+    };
+    // Only include issues from this specific review
+    if (parsed.loop_review_id && parsed.loop_review_id !== review.id) {
+      continue;
+    }
+    issues.push({
+      taskId: row.task_id ?? undefined,
+      file: row.file ?? '',
+      line: row.line ?? undefined,
+      type: parsed.issue_type,
+      description: parsed.description,
+      suggestion: parsed.suggestion,
+    });
+  }
 
   return {
     reviewId: review.id,

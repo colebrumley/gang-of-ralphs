@@ -1,17 +1,16 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
 import {
-  AddContextSchema,
   AddPlanGroupSchema,
   CompleteTaskSchema,
   CreateLoopSchema,
   FailTaskSchema,
   PersistLoopStateSchema,
+  ReadContextSchema,
   RecordCostSchema,
   RecordPhaseCostSchema,
-  ReviewIssueSchema,
-  SetReviewResultSchema,
   UpdateLoopStatusSchema,
+  WriteContextSchema,
   WriteTaskSchema,
 } from './tools.js';
 
@@ -178,159 +177,6 @@ describe('MCP Tool Schemas', () => {
     });
   });
 
-  describe('AddContextSchema', () => {
-    test('accepts discovery context', () => {
-      const result = AddContextSchema.parse({
-        type: 'discovery',
-        content: 'Found existing auth pattern',
-      });
-
-      assert.strictEqual(result.type, 'discovery');
-      assert.strictEqual(result.content, 'Found existing auth pattern');
-    });
-
-    test('accepts error context', () => {
-      const result = AddContextSchema.parse({
-        type: 'error',
-        content: 'Build failed: missing dependency',
-      });
-
-      assert.strictEqual(result.type, 'error');
-    });
-
-    test('accepts decision context', () => {
-      const result = AddContextSchema.parse({
-        type: 'decision',
-        content: 'Using JWT for auth',
-      });
-
-      assert.strictEqual(result.type, 'decision');
-    });
-
-    test('rejects invalid type', () => {
-      assert.throws(() => {
-        AddContextSchema.parse({
-          type: 'invalid',
-          content: 'Something',
-        });
-      });
-    });
-  });
-
-  describe('ReviewIssueSchema', () => {
-    test('accepts valid issue with line', () => {
-      const result = ReviewIssueSchema.parse({
-        taskId: 'task-1',
-        file: 'src/utils.ts',
-        line: 42,
-        type: 'over-engineering',
-        description: 'Unnecessary wrapper class',
-        suggestion: 'Use a plain function',
-      });
-
-      assert.strictEqual(result.file, 'src/utils.ts');
-      assert.strictEqual(result.line, 42);
-      assert.strictEqual(result.type, 'over-engineering');
-    });
-
-    test('accepts issue without line', () => {
-      const result = ReviewIssueSchema.parse({
-        taskId: 'task-1',
-        file: 'src/api.ts',
-        type: 'missing-error-handling',
-        description: 'No try-catch',
-        suggestion: 'Add error handling',
-      });
-
-      assert.strictEqual(result.line, undefined);
-    });
-
-    test('accepts all issue types', () => {
-      const types = [
-        'over-engineering',
-        'missing-error-handling',
-        'pattern-violation',
-        'dead-code',
-      ];
-      for (const type of types) {
-        const result = ReviewIssueSchema.parse({
-          taskId: 'task-1',
-          file: 'src/test.ts',
-          type,
-          description: 'Test issue',
-          suggestion: 'Fix it',
-        });
-        assert.strictEqual(result.type, type);
-      }
-    });
-  });
-
-  describe('SetReviewResultSchema', () => {
-    test('accepts passed review', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants to add a feature',
-        intentSatisfied: true,
-        passed: true,
-        issues: [],
-      });
-
-      assert.strictEqual(result.passed, true);
-      assert.strictEqual(result.intentSatisfied, true);
-      assert.strictEqual(result.interpretedIntent, 'User wants to add a feature');
-      assert.deepStrictEqual(result.issues, []);
-    });
-
-    test('accepts failed review with issues', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants clean code',
-        intentSatisfied: false,
-        passed: false,
-        issues: [
-          {
-            taskId: 'task-1',
-            file: 'src/main.ts',
-            type: 'dead-code',
-            description: 'Unused import',
-            suggestion: 'Remove it',
-          },
-        ],
-      });
-
-      assert.strictEqual(result.passed, false);
-      assert.strictEqual(result.intentSatisfied, false);
-      assert.strictEqual(result.issues.length, 1);
-    });
-
-    test('defaults issues to empty array', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants a working feature',
-        intentSatisfied: true,
-        passed: true,
-      });
-      assert.deepStrictEqual(result.issues, []);
-    });
-
-    test('accepts spec-intent-mismatch issue type', () => {
-      const result = SetReviewResultSchema.parse({
-        interpretedIntent: 'User wants user-friendly error messages',
-        intentSatisfied: false,
-        passed: true,
-        issues: [
-          {
-            taskId: 'task-1',
-            file: 'src/form.tsx',
-            type: 'spec-intent-mismatch',
-            description: 'Error messages are technical codes',
-            suggestion: 'Use human-readable messages',
-          },
-        ],
-      });
-
-      assert.strictEqual(result.intentSatisfied, false);
-      assert.strictEqual(result.issues[0].type, 'spec-intent-mismatch');
-    });
-  });
-
   describe('CreateLoopSchema', () => {
     test('accepts valid loop creation', () => {
       const result = CreateLoopSchema.parse({
@@ -425,6 +271,98 @@ describe('MCP Tool Schemas', () => {
           costUsd: 0.01,
         });
       });
+    });
+  });
+
+  describe('WriteContextSchema', () => {
+    test('accepts valid discovery context', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'discovery',
+        content: 'Found existing auth middleware',
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts review_issue with all fields', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'review_issue',
+        content: JSON.stringify({
+          issue_type: 'dead-code',
+          description: 'Unused',
+          suggestion: 'Remove',
+        }),
+        task_id: 'task-1',
+        file: 'src/foo.ts',
+        line: 42,
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts scratchpad with loop_id', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'scratchpad',
+        content: JSON.stringify({ iteration: 1, done: false }),
+        loop_id: 'loop-1',
+      });
+      assert.ok(result.success);
+    });
+
+    test('rejects invalid type', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'invalid',
+        content: 'test',
+      });
+      assert.ok(!result.success);
+    });
+
+    test('rejects missing content', () => {
+      const result = WriteContextSchema.safeParse({
+        type: 'discovery',
+      });
+      assert.ok(!result.success);
+    });
+  });
+
+  describe('ReadContextSchema', () => {
+    test('accepts empty object (all optional)', () => {
+      const result = ReadContextSchema.safeParse({});
+      assert.ok(result.success);
+    });
+
+    test('accepts types array', () => {
+      const result = ReadContextSchema.safeParse({
+        types: ['discovery', 'error'],
+      });
+      assert.ok(result.success);
+    });
+
+    test('accepts all filter options', () => {
+      const result = ReadContextSchema.safeParse({
+        types: ['review_issue'],
+        task_id: 'task-1',
+        loop_id: 'loop-1',
+        file: 'src/foo.ts',
+        search: 'authentication',
+        limit: 100,
+        offset: 10,
+        order: 'asc',
+      });
+      assert.ok(result.success);
+    });
+
+    test('defaults limit to 500', () => {
+      const result = ReadContextSchema.parse({});
+      assert.strictEqual(result.limit, 500);
+    });
+
+    test('defaults order to desc', () => {
+      const result = ReadContextSchema.parse({});
+      assert.strictEqual(result.order, 'desc');
+    });
+
+    test('rejects invalid order', () => {
+      const result = ReadContextSchema.safeParse({ order: 'invalid' });
+      assert.ok(!result.success);
     });
   });
 });

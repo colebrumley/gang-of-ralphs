@@ -80,68 +80,205 @@ describe('MCP Server', () => {
     const db = getDatabase();
 
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content)
+      INSERT INTO context (run_id, type, content)
       VALUES (?, ?, ?)
     `).run('test-run', 'discovery', 'Found existing pattern');
 
-    const entries = db
-      .prepare('SELECT * FROM context_entries WHERE run_id = ?')
-      .all('test-run') as any[];
+    const entries = db.prepare('SELECT * FROM context WHERE run_id = ?').all('test-run') as any[];
     assert.strictEqual(entries.length, 1);
-    assert.strictEqual(entries[0].entry_type, 'discovery');
+    assert.strictEqual(entries[0].type, 'discovery');
     assert.strictEqual(entries[0].content, 'Found existing pattern');
   });
 
   test('set_review_result stores structured review issues', () => {
     const db = getDatabase();
 
-    // Insert a structured review issue
+    // Insert a structured review issue into unified context table
     db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO context (run_id, type, content, task_id, file, line)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       'test-run',
+      'review_issue',
+      JSON.stringify({
+        issue_type: 'over-engineering',
+        description: 'Unnecessary abstraction',
+        suggestion: 'Simplify the code',
+      }),
       'task-1',
       'src/index.ts',
-      42,
-      'over-engineering',
-      'Unnecessary abstraction',
-      'Simplify the code'
+      42
     );
 
     const issues = db
-      .prepare('SELECT * FROM review_issues WHERE run_id = ?')
+      .prepare("SELECT * FROM context WHERE run_id = ? AND type = 'review_issue'")
       .all('test-run') as any[];
     assert.strictEqual(issues.length, 1);
     assert.strictEqual(issues[0].task_id, 'task-1');
     assert.strictEqual(issues[0].file, 'src/index.ts');
     assert.strictEqual(issues[0].line, 42);
-    assert.strictEqual(issues[0].type, 'over-engineering');
-    assert.strictEqual(issues[0].description, 'Unnecessary abstraction');
-    assert.strictEqual(issues[0].suggestion, 'Simplify the code');
+    const content = JSON.parse(issues[0].content);
+    assert.strictEqual(content.issue_type, 'over-engineering');
+    assert.strictEqual(content.description, 'Unnecessary abstraction');
+    assert.strictEqual(content.suggestion, 'Simplify the code');
   });
 
   test('set_review_result allows null line number', () => {
     const db = getDatabase();
 
-    // Insert a review issue without line number
+    // Insert a review issue without line number into unified context table
     db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO context (run_id, type, content, task_id, file, line)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       'test-run',
+      'review_issue',
+      JSON.stringify({
+        issue_type: 'dead-code',
+        description: 'Unused function',
+        suggestion: 'Remove the function',
+      }),
       'task-1',
       'src/utils.ts',
-      null,
-      'dead-code',
-      'Unused function',
-      'Remove the function'
+      null
     );
 
     const issues = db
-      .prepare('SELECT * FROM review_issues WHERE run_id = ?')
+      .prepare("SELECT * FROM context WHERE run_id = ? AND type = 'review_issue'")
       .all('test-run') as any[];
     assert.strictEqual(issues.length, 1);
     assert.strictEqual(issues[0].line, null);
+  });
+
+  test('write_context creates context entry via writeContextToDb', async () => {
+    const db = getDatabase();
+    // Import and use writeContextToDb directly (which is what the MCP tool uses)
+    const { writeContextToDb } = await import('../db/context.js');
+
+    const { id } = writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'discovery',
+      content: 'Found existing auth',
+    });
+
+    assert.ok(id > 0);
+
+    const row = db
+      .prepare('SELECT * FROM context WHERE run_id = ? AND type = ?')
+      .get('test-run', 'discovery') as { content: string };
+    assert.strictEqual(row.content, 'Found existing auth');
+  });
+
+  test('write_context creates scratchpad with loop_id via writeContextToDb', async () => {
+    const db = getDatabase();
+    const { writeContextToDb } = await import('../db/context.js');
+
+    writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'scratchpad',
+      content: JSON.stringify({ iteration: 1, done: false, next_step: 'Fix bug' }),
+      loopId: 'test-loop',
+    });
+
+    const row = db
+      .prepare('SELECT * FROM context WHERE run_id = ? AND type = ?')
+      .get('test-run', 'scratchpad') as { loop_id: string };
+    assert.strictEqual(row.loop_id, 'test-loop');
+  });
+
+  test('write_context supports all optional fields', async () => {
+    const db = getDatabase();
+    const { writeContextToDb } = await import('../db/context.js');
+
+    const { id } = writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'review_issue',
+      content: 'Missing error handling',
+      taskId: 'task-1',
+      loopId: 'loop-1',
+      file: 'src/index.ts',
+      line: 42,
+    });
+
+    const row = db.prepare('SELECT * FROM context WHERE id = ?').get(id) as {
+      type: string;
+      content: string;
+      task_id: string;
+      loop_id: string;
+      file: string;
+      line: number;
+    };
+    assert.strictEqual(row.type, 'review_issue');
+    assert.strictEqual(row.content, 'Missing error handling');
+    assert.strictEqual(row.task_id, 'task-1');
+    assert.strictEqual(row.loop_id, 'loop-1');
+    assert.strictEqual(row.file, 'src/index.ts');
+    assert.strictEqual(row.line, 42);
+  });
+
+  test('read_context returns all context for run via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found auth'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'error',
+      'Build failed'
+    );
+
+    const { entries, total } = readContextFromDb(db, { runId: 'test-run' });
+    assert.strictEqual(total, 2);
+    assert.strictEqual(entries.length, 2);
+  });
+
+  test('read_context filters by type via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found auth'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'error',
+      'Build failed'
+    );
+
+    const { entries, total } = readContextFromDb(db, {
+      runId: 'test-run',
+      types: ['discovery'],
+    });
+    assert.strictEqual(total, 1);
+    assert.strictEqual(entries[0].type, 'discovery');
+  });
+
+  test('read_context supports full-text search via readContextFromDb', async () => {
+    const db = getDatabase();
+    const { readContextFromDb } = await import('../db/context.js');
+
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found authentication middleware'
+    );
+    db.prepare('INSERT INTO context (run_id, type, content) VALUES (?, ?, ?)').run(
+      'test-run',
+      'discovery',
+      'Found database pool'
+    );
+
+    const { entries, total } = readContextFromDb(db, {
+      runId: 'test-run',
+      search: 'authentication',
+    });
+    assert.strictEqual(total, 1);
+    assert.ok(entries[0].content.includes('authentication'));
   });
 });

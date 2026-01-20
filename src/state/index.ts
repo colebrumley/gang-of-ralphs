@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getEffortConfig } from '../config/effort.js';
+import { pruneContext, readContextFromDb } from '../db/context.js';
 import { closeDatabase, createDatabase, getDatabase } from '../db/index.js';
 import { SetCodebaseAnalysisSchema } from '../mcp/tools.js';
 
@@ -312,41 +313,6 @@ function savePendingConflicts(state: OrchestratorState): void {
   }
 }
 
-/**
- * Prune old context entries from the database to prevent unbounded storage growth.
- * Keeps only the most recent MAX_CONTEXT_ENTRIES_PER_TYPE entries per type.
- */
-function pruneContextEntries(db: ReturnType<typeof getDatabase>, runId: string): void {
-  for (const entryType of ['discovery', 'error', 'decision']) {
-    // Delete entries older than the Nth most recent entry for this type
-    db.prepare(`
-      DELETE FROM context_entries
-      WHERE run_id = ? AND entry_type = ? AND id NOT IN (
-        SELECT id FROM context_entries
-        WHERE run_id = ? AND entry_type = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-      )
-    `).run(runId, entryType, runId, entryType, MAX_CONTEXT_ENTRIES_PER_TYPE);
-  }
-}
-
-/**
- * Prune old review issues from the database to prevent unbounded storage growth.
- * Keeps only the most recent MAX_REVIEW_ISSUES entries.
- */
-function pruneReviewIssues(db: ReturnType<typeof getDatabase>, runId: string): void {
-  db.prepare(`
-    DELETE FROM review_issues
-    WHERE run_id = ? AND id NOT IN (
-      SELECT id FROM review_issues
-      WHERE run_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    )
-  `).run(runId, runId, MAX_REVIEW_ISSUES);
-}
-
 export function loadState(stateDir: string): OrchestratorState | null {
   const dbPath = join(stateDir, 'state.db');
   if (!existsSync(dbPath)) {
@@ -534,59 +500,66 @@ export function loadState(stateDir: string): OrchestratorState | null {
     costUsd: row.cost_usd ?? 0,
   }));
 
-  // Load context entries with limits to prevent unbounded memory growth
-  // Load only the most recent entries per type, ordered oldest-first for chronological display
-  const loadContextEntries = (entryType: string): string[] => {
-    const rows = db
-      .prepare(`
-        SELECT content FROM (
-          SELECT content, created_at FROM context_entries
-          WHERE run_id = ? AND entry_type = ?
-          ORDER BY created_at DESC
-          LIMIT ?
-        ) ORDER BY created_at ASC
-      `)
-      .all(run.id, entryType, MAX_CONTEXT_ENTRIES_PER_TYPE) as Array<{ content: string }>;
-    return rows.map((row) => row.content);
-  };
+  // Load context from unified context table
+  // Excludes scratchpad entries (agents read those directly via read_context MCP tool)
+  const contextResult = readContextFromDb(db, {
+    runId: run.id,
+    types: ['discovery', 'error', 'decision', 'review_issue', 'codebase_analysis'],
+    limit: 2000,
+    order: 'asc',
+  });
 
-  const discoveries = loadContextEntries('discovery');
-  const errors = loadContextEntries('error');
-  const decisions = loadContextEntries('decision');
+  // Partition entries by type
+  const allDiscoveries: string[] = [];
+  const allErrors: string[] = [];
+  const allDecisions: string[] = [];
+  const allReviewIssues: ReviewIssue[] = [];
+  let codebaseAnalysisFromContext: typeof run.codebase_analysis = null;
+
+  for (const entry of contextResult.entries) {
+    switch (entry.type) {
+      case 'discovery':
+        allDiscoveries.push(entry.content);
+        break;
+      case 'error':
+        allErrors.push(entry.content);
+        break;
+      case 'decision':
+        allDecisions.push(entry.content);
+        break;
+      case 'review_issue': {
+        // Parse JSON content: { issue_type, description, suggestion }
+        const parsed = JSON.parse(entry.content) as {
+          issue_type: ReviewIssueType;
+          description: string;
+          suggestion: string;
+        };
+        allReviewIssues.push({
+          taskId: entry.task_id ?? undefined,
+          file: entry.file ?? '',
+          line: entry.line ?? undefined,
+          type: parsed.issue_type,
+          description: parsed.description,
+          suggestion: parsed.suggestion,
+        });
+        break;
+      }
+      case 'codebase_analysis':
+        // Most recent codebase_analysis wins (entries are ordered ASC, so last is newest)
+        codebaseAnalysisFromContext = entry.content;
+        break;
+    }
+  }
+
+  // Limit entries per type to prevent unbounded memory growth
+  // Keep most recent entries (entries are ordered ASC by created_at, so slice from end)
+  const discoveries = allDiscoveries.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
+  const errors = allErrors.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
+  const decisions = allDecisions.slice(-MAX_CONTEXT_ENTRIES_PER_TYPE);
+  const reviewIssues = allReviewIssues.slice(-MAX_REVIEW_ISSUES);
 
   // Prune old context entries from database to prevent unbounded storage growth
-  pruneContextEntries(db, run.id);
-
-  // Load review issues with limit to prevent unbounded memory growth
-  // Most recent issues are most relevant, so load newest first then reverse for chronological order
-  const reviewIssueRows = db
-    .prepare(`
-    SELECT * FROM (
-      SELECT * FROM review_issues WHERE run_id = ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    ) ORDER BY created_at ASC
-  `)
-    .all(run.id, MAX_REVIEW_ISSUES) as Array<{
-    task_id: string;
-    file: string;
-    line: number | null;
-    type: ReviewIssueType;
-    description: string;
-    suggestion: string;
-  }>;
-
-  const reviewIssues: ReviewIssue[] = reviewIssueRows.map((row) => ({
-    taskId: row.task_id,
-    file: row.file,
-    line: row.line ?? undefined,
-    type: row.type,
-    description: row.description,
-    suggestion: row.suggestion,
-  }));
-
-  // Prune old review issues from database to prevent unbounded storage growth
-  pruneReviewIssues(db, run.id);
+  pruneContext(db, run.id);
 
   // Get completed task IDs
   const completedTasks = tasks.filter((t) => t.status === 'completed').map((t) => t.id);
@@ -666,9 +639,12 @@ export function loadState(stateDir: string): OrchestratorState | null {
     debug: false, // Runtime option, not persisted
     pendingConflicts,
     wasEmptyProject: run.was_empty_project === null ? null : run.was_empty_project === 1,
-    codebaseAnalysis: run.codebase_analysis
-      ? SetCodebaseAnalysisSchema.parse(JSON.parse(run.codebase_analysis))
-      : null,
+    // Prefer codebaseAnalysis from unified context table, fall back to runs table for backwards compatibility
+    codebaseAnalysis: codebaseAnalysisFromContext
+      ? SetCodebaseAnalysisSchema.parse(JSON.parse(codebaseAnalysisFromContext))
+      : run.codebase_analysis
+        ? SetCodebaseAnalysisSchema.parse(JSON.parse(run.codebase_analysis))
+        : null,
   };
 }
 

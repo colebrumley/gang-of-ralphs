@@ -125,24 +125,34 @@ describe('State Persistence', () => {
 
     saveRun(state);
 
-    // Insert review issues directly into database
+    // Insert review issues into unified context table
     const db = getDatabase();
     db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO context (run_id, type, content, task_id, file, line)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       state.runId,
+      'review_issue',
+      JSON.stringify({
+        issue_type: 'over-engineering',
+        description: 'Too complex',
+        suggestion: 'Simplify',
+      }),
       'task-1',
       'src/index.ts',
-      42,
-      'over-engineering',
-      'Too complex',
-      'Simplify'
+      42
     );
     db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, line, type, description, suggestion)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(state.runId, 'task-2', 'src/utils.ts', null, 'dead-code', 'Unused', 'Remove');
+      INSERT INTO context (run_id, type, content, task_id, file, line)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      state.runId,
+      'review_issue',
+      JSON.stringify({ issue_type: 'dead-code', description: 'Unused', suggestion: 'Remove' }),
+      'task-2',
+      'src/utils.ts',
+      null
+    );
 
     closeDatabase();
     const loaded = loadState(tempDir);
@@ -319,18 +329,18 @@ describe('State Persistence', () => {
 
     saveRun(state);
 
-    // Insert context entries
+    // Insert context entries into unified context table
     const db = getDatabase();
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content)
+      INSERT INTO context (run_id, type, content)
       VALUES (?, ?, ?)
     `).run(state.runId, 'discovery', 'Found existing auth pattern');
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content)
+      INSERT INTO context (run_id, type, content)
       VALUES (?, ?, ?)
     `).run(state.runId, 'error', 'Build failed: missing module');
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content)
+      INSERT INTO context (run_id, type, content)
       VALUES (?, ?, ?)
     `).run(state.runId, 'decision', 'Using JWT for authentication');
 
@@ -721,7 +731,7 @@ describe('State Persistence', () => {
     // Insert more entries than the limit for each type
     const db = getDatabase();
     const insertStmt = db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      INSERT INTO context (run_id, type, content, created_at)
       VALUES (?, ?, ?, datetime('now', ? || ' seconds'))
     `);
 
@@ -772,7 +782,7 @@ describe('State Persistence', () => {
     // Insert more entries than the limit
     const db = getDatabase();
     const insertStmt = db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      INSERT INTO context (run_id, type, content, created_at)
       VALUES (?, ?, ?, datetime('now', ? || ' seconds'))
     `);
 
@@ -783,9 +793,7 @@ describe('State Persistence', () => {
 
     // Verify we have more than the limit before loading
     const countBefore = db
-      .prepare(
-        "SELECT COUNT(*) as count FROM context_entries WHERE run_id = ? AND entry_type = 'discovery'"
-      )
+      .prepare("SELECT COUNT(*) as count FROM context WHERE run_id = ? AND type = 'discovery'")
       .get(state.runId) as { count: number };
     assert.strictEqual(countBefore.count, numEntries);
 
@@ -798,9 +806,7 @@ describe('State Persistence', () => {
     // Verify database now has only the limit
     const dbAfter = getDatabase();
     const countAfter = dbAfter
-      .prepare(
-        "SELECT COUNT(*) as count FROM context_entries WHERE run_id = ? AND entry_type = 'discovery'"
-      )
+      .prepare("SELECT COUNT(*) as count FROM context WHERE run_id = ? AND type = 'discovery'")
       .get(state.runId) as { count: number };
     assert.strictEqual(countAfter.count, MAX_CONTEXT_ENTRIES_PER_TYPE);
   });
@@ -823,19 +829,22 @@ describe('State Persistence', () => {
     // Insert more issues than the limit
     const db = getDatabase();
     const insertStmt = db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, type, description, suggestion, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
+      INSERT INTO context (run_id, type, content, task_id, file, created_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
     `);
 
     const numIssues = MAX_REVIEW_ISSUES + 20;
     for (let i = 0; i < numIssues; i++) {
       insertStmt.run(
         state.runId,
+        'review_issue',
+        JSON.stringify({
+          issue_type: 'over-engineering',
+          description: `Issue ${i}`,
+          suggestion: `Fix ${i}`,
+        }),
         `task-${i}`,
         `src/file${i}.ts`,
-        'over-engineering',
-        `Issue ${i}`,
-        `Fix ${i}`,
         i.toString()
       );
     }
@@ -876,26 +885,29 @@ describe('State Persistence', () => {
     // Insert more issues than the limit
     const db = getDatabase();
     const insertStmt = db.prepare(`
-      INSERT INTO review_issues (run_id, task_id, file, type, description, suggestion, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
+      INSERT INTO context (run_id, type, content, task_id, file, created_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now', ? || ' seconds'))
     `);
 
     const numIssues = MAX_REVIEW_ISSUES + 30;
     for (let i = 0; i < numIssues; i++) {
       insertStmt.run(
         state.runId,
+        'review_issue',
+        JSON.stringify({
+          issue_type: 'dead-code',
+          description: `Issue ${i}`,
+          suggestion: `Fix ${i}`,
+        }),
         `task-${i}`,
         `src/file${i}.ts`,
-        'dead-code',
-        `Issue ${i}`,
-        `Fix ${i}`,
         i.toString()
       );
     }
 
     // Verify we have more than the limit before loading
     const countBefore = db
-      .prepare('SELECT COUNT(*) as count FROM review_issues WHERE run_id = ?')
+      .prepare("SELECT COUNT(*) as count FROM context WHERE run_id = ? AND type = 'review_issue'")
       .get(state.runId) as { count: number };
     assert.strictEqual(countBefore.count, numIssues);
 
@@ -908,7 +920,7 @@ describe('State Persistence', () => {
     // Verify database now has only the limit
     const dbAfter = getDatabase();
     const countAfter = dbAfter
-      .prepare('SELECT COUNT(*) as count FROM review_issues WHERE run_id = ?')
+      .prepare("SELECT COUNT(*) as count FROM context WHERE run_id = ? AND type = 'review_issue'")
       .get(state.runId) as { count: number };
     assert.strictEqual(countAfter.count, MAX_REVIEW_ISSUES);
   });
@@ -931,15 +943,15 @@ describe('State Persistence', () => {
     // Insert entries with specific timestamps
     const db = getDatabase();
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      INSERT INTO context (run_id, type, content, created_at)
       VALUES (?, ?, ?, ?)
     `).run(state.runId, 'discovery', 'Oldest discovery', '2024-01-01 10:00:00');
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      INSERT INTO context (run_id, type, content, created_at)
       VALUES (?, ?, ?, ?)
     `).run(state.runId, 'discovery', 'Middle discovery', '2024-01-01 11:00:00');
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content, created_at)
+      INSERT INTO context (run_id, type, content, created_at)
       VALUES (?, ?, ?, ?)
     `).run(state.runId, 'discovery', 'Newest discovery', '2024-01-01 12:00:00');
 

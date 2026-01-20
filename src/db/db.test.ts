@@ -31,7 +31,7 @@ describe('Database', () => {
     assert.ok(tableNames.includes('loops'));
     assert.ok(tableNames.includes('plan_groups'));
     assert.ok(tableNames.includes('phase_history'));
-    assert.ok(tableNames.includes('context_entries'));
+    assert.ok(tableNames.includes('context'));
   });
 
   test('can create and retrieve a run', () => {
