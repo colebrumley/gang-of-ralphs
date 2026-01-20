@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { writeContextToDb } from '../db/context.js';
 import { getDatabase } from '../db/index.js';
 import {
   AddContextSchema,
@@ -17,6 +18,7 @@ import {
   SetLoopReviewResultSchema,
   SetReviewResultSchema,
   UpdateLoopStatusSchema,
+  WriteContextSchema,
   WriteScratchpadSchema,
   WriteTaskSchema,
 } from './tools.js';
@@ -399,6 +401,38 @@ export function createMCPServer(runId: string, dbPath: string) {
           required: ['loopId', 'done', 'testStatus', 'nextStep', 'blockers'],
         },
       },
+      {
+        name: 'write_context',
+        description:
+          'Write context to the shared context store. Use for discoveries, errors, decisions, review issues, scratchpad entries, and codebase analysis.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            type: {
+              type: 'string',
+              enum: [
+                'discovery',
+                'error',
+                'decision',
+                'review_issue',
+                'scratchpad',
+                'codebase_analysis',
+              ],
+              description: 'The type of context being written',
+            },
+            content: {
+              type: 'string',
+              description:
+                'The content. Plain string for simple types, JSON string for structured types',
+            },
+            task_id: { type: 'string', description: 'Associated task ID (optional)' },
+            loop_id: { type: 'string', description: 'Associated loop ID (optional)' },
+            file: { type: 'string', description: 'Associated file path (optional)' },
+            line: { type: 'number', description: 'Associated line number (optional)' },
+          },
+          required: ['type', 'content'],
+        },
+      },
     ],
   }));
 
@@ -729,6 +763,23 @@ ${scratchpad.blockers}
         } catch (e) {
           result = { content: [{ type: 'text', text: `Failed to write scratchpad: ${e}` }] };
         }
+        break;
+      }
+
+      case 'write_context': {
+        const ctx = WriteContextSchema.parse(args);
+        const { id } = writeContextToDb(db, {
+          runId,
+          type: ctx.type,
+          content: ctx.content,
+          taskId: ctx.task_id,
+          loopId: ctx.loop_id,
+          file: ctx.file,
+          line: ctx.line,
+        });
+        result = {
+          content: [{ type: 'text', text: `Context written (id: ${id}, type: ${ctx.type})` }],
+        };
         break;
       }
 

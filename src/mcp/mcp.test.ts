@@ -80,15 +80,13 @@ describe('MCP Server', () => {
     const db = getDatabase();
 
     db.prepare(`
-      INSERT INTO context_entries (run_id, entry_type, content)
+      INSERT INTO context (run_id, type, content)
       VALUES (?, ?, ?)
     `).run('test-run', 'discovery', 'Found existing pattern');
 
-    const entries = db
-      .prepare('SELECT * FROM context_entries WHERE run_id = ?')
-      .all('test-run') as any[];
+    const entries = db.prepare('SELECT * FROM context WHERE run_id = ?').all('test-run') as any[];
     assert.strictEqual(entries.length, 1);
-    assert.strictEqual(entries[0].entry_type, 'discovery');
+    assert.strictEqual(entries[0].type, 'discovery');
     assert.strictEqual(entries[0].content, 'Found existing pattern');
   });
 
@@ -143,5 +141,71 @@ describe('MCP Server', () => {
       .all('test-run') as any[];
     assert.strictEqual(issues.length, 1);
     assert.strictEqual(issues[0].line, null);
+  });
+
+  test('write_context creates context entry via writeContextToDb', async () => {
+    const db = getDatabase();
+    // Import and use writeContextToDb directly (which is what the MCP tool uses)
+    const { writeContextToDb } = await import('../db/context.js');
+
+    const { id } = writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'discovery',
+      content: 'Found existing auth',
+    });
+
+    assert.ok(id > 0);
+
+    const row = db
+      .prepare('SELECT * FROM context WHERE run_id = ? AND type = ?')
+      .get('test-run', 'discovery') as { content: string };
+    assert.strictEqual(row.content, 'Found existing auth');
+  });
+
+  test('write_context creates scratchpad with loop_id via writeContextToDb', async () => {
+    const db = getDatabase();
+    const { writeContextToDb } = await import('../db/context.js');
+
+    writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'scratchpad',
+      content: JSON.stringify({ iteration: 1, done: false, next_step: 'Fix bug' }),
+      loopId: 'test-loop',
+    });
+
+    const row = db
+      .prepare('SELECT * FROM context WHERE run_id = ? AND type = ?')
+      .get('test-run', 'scratchpad') as { loop_id: string };
+    assert.strictEqual(row.loop_id, 'test-loop');
+  });
+
+  test('write_context supports all optional fields', async () => {
+    const db = getDatabase();
+    const { writeContextToDb } = await import('../db/context.js');
+
+    const { id } = writeContextToDb(db, {
+      runId: 'test-run',
+      type: 'review_issue',
+      content: 'Missing error handling',
+      taskId: 'task-1',
+      loopId: 'loop-1',
+      file: 'src/index.ts',
+      line: 42,
+    });
+
+    const row = db.prepare('SELECT * FROM context WHERE id = ?').get(id) as {
+      type: string;
+      content: string;
+      task_id: string;
+      loop_id: string;
+      file: string;
+      line: number;
+    };
+    assert.strictEqual(row.type, 'review_issue');
+    assert.strictEqual(row.content, 'Missing error handling');
+    assert.strictEqual(row.task_id, 'task-1');
+    assert.strictEqual(row.loop_id, 'loop-1');
+    assert.strictEqual(row.file, 'src/index.ts');
+    assert.strictEqual(row.line, 42);
   });
 });
