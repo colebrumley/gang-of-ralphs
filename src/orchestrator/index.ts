@@ -65,6 +65,7 @@ export interface OrchestratorCallbacks {
   onOutput?: (text: string) => void;
   onLoopCreated?: (loop: LoopState) => void;
   onLoopOutput?: (loopId: string, text: string) => void;
+  onLoopStateChange?: (loop: LoopState) => void;
   tracer?: DebugTracer;
 }
 
@@ -222,6 +223,7 @@ export async function runOrchestrator(
           loopManager,
           callbacks.onLoopCreated,
           callbacks.onLoopOutput,
+          callbacks.onLoopStateChange,
           callbacks.tracer
         );
 

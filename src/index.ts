@@ -145,8 +145,20 @@ async function main() {
     // Initialize database and save the new run
     const dbPath = join(stateDir, 'state.db');
     if (!existsSync(stateDir)) {
-      const { mkdirSync } = await import('node:fs');
+      const { appendFileSync, mkdirSync, readFileSync } = await import('node:fs');
       mkdirSync(stateDir, { recursive: true });
+
+      // Add .sq to .gitignore if not already present
+      const gitignorePath = join(process.cwd(), '.gitignore');
+      const sqPattern = '.sq/';
+      if (existsSync(gitignorePath)) {
+        const content = readFileSync(gitignorePath, 'utf-8');
+        if (!content.split('\n').some((line) => line.trim() === '.sq' || line.trim() === '.sq/')) {
+          appendFileSync(gitignorePath, `\n${sqPattern}\n`);
+        }
+      } else {
+        appendFileSync(gitignorePath, `${sqPattern}\n`);
+      }
     }
     createDatabase(dbPath);
     saveRun(state);

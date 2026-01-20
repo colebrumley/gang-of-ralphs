@@ -861,7 +861,8 @@ Before calling set_loop_review_result, you MUST:
   const mcpInstructions = `
 ## How to Report Results
 
-Use \`set_loop_review_result\` when finished:
+**CRITICAL: You MUST call \`set_loop_review_result\` with the EXACT IDs shown below.**
+Do NOT guess or modify the loopId or taskId - use them exactly as provided.
 
 \`\`\`
 set_loop_review_result({
@@ -873,6 +874,10 @@ set_loop_review_result({
   issues: [{ file, line, type, description, suggestion }]
 })
 \`\`\`
+
+**Required values (copy exactly):**
+- loopId: \`${loop.loopId}\`
+- taskId: \`${task.id}\`
 
 Issue types: over-engineering, missing-error-handling, pattern-violation, dead-code, spec-intent-mismatch`;
 
@@ -983,24 +988,91 @@ export async function executeLoopReview(
   const cwd = loop.worktreePath || process.cwd();
   const config = createAgentConfig('review', cwd, state.runId, dbPath, model);
 
-  const prompt = `${getLoopReviewPrompt(loop, task, otherLoopsSummary, effortConfig.reviewDepth, isCheckpoint)}
-
-## Spec:
-File: ${state.specPath}`;
-
-  const { costUsd } = await runReviewAgent(
-    prompt,
-    cwd,
-    config,
-    state.runId,
-    dbPath,
-    onOutput,
-    tracer,
-    loop.loopId
+  const basePrompt = getLoopReviewPrompt(
+    loop,
+    task,
+    otherLoopsSummary,
+    effortConfig.reviewDepth,
+    isCheckpoint
   );
 
-  const { reviewId, passed, issues, interpretedIntent, intentSatisfied } =
-    loadLoopReviewResultFromDB(state.runId, loop.loopId);
+  const maxAttempts = 2;
+  let totalCostUsd = 0;
 
-  return { passed, issues, costUsd, reviewId: reviewId || '', interpretedIntent, intentSatisfied };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Build prompt - add retry context if this isn't the first attempt
+    let prompt = `${basePrompt}\n\n## Spec:\nFile: ${state.specPath}`;
+
+    if (attempt > 1) {
+      prompt = `${prompt}
+
+## IMPORTANT: Previous Attempt Failed
+
+Your previous call to \`set_loop_review_result\` failed to store the result.
+You MUST call it again with the EXACT values shown above:
+- loopId: "${loop.loopId}"
+- taskId: "${task.id}"
+
+Do NOT guess different IDs. Copy these values exactly.`;
+
+      onOutput?.(`\n[review] Retry attempt ${attempt}/${maxAttempts} - previous MCP call failed\n`);
+    }
+
+    const { costUsd } = await runReviewAgent(
+      prompt,
+      cwd,
+      config,
+      state.runId,
+      dbPath,
+      onOutput,
+      tracer,
+      loop.loopId
+    );
+
+    totalCostUsd += costUsd;
+
+    const dbResult = loadLoopReviewResultFromDB(state.runId, loop.loopId);
+
+    if (dbResult.reviewId) {
+      // Success - result was stored
+      if (attempt > 1) {
+        tracer?.logDecision(
+          'review_retry',
+          { loopId: loop.loopId, attempt },
+          'success',
+          `Review succeeded on attempt ${attempt}`
+        );
+      }
+
+      return {
+        passed: dbResult.passed,
+        issues: dbResult.issues,
+        costUsd: totalCostUsd,
+        reviewId: dbResult.reviewId,
+        interpretedIntent: dbResult.interpretedIntent,
+        intentSatisfied: dbResult.intentSatisfied,
+      };
+    }
+
+    // No result stored - log and retry if attempts remain
+    tracer?.logError(
+      `Loop ${loop.loopId} review: MCP call failed to store result (attempt ${attempt}/${maxAttempts})`,
+      'review'
+    );
+  }
+
+  // All attempts failed - return failed state
+  tracer?.logError(
+    `Loop ${loop.loopId} review: All ${maxAttempts} attempts failed to store result`,
+    'review'
+  );
+
+  return {
+    passed: false,
+    issues: [],
+    costUsd: totalCostUsd,
+    reviewId: '',
+    interpretedIntent: undefined,
+    intentSatisfied: undefined,
+  };
 }

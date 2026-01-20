@@ -172,6 +172,7 @@ export async function executeBuildIteration(
   loopManager: LoopManager,
   onLoopCreated?: (loop: LoopState) => void,
   onLoopOutput?: (loopId: string, text: string) => void,
+  onLoopStateChange?: (loop: LoopState) => void,
   tracer?: DebugTracer
 ): Promise<BuildResult> {
   const graph = state.taskGraph!;
@@ -443,6 +444,10 @@ export async function executeBuildIteration(
       if (output.includes('TASK_COMPLETE')) {
         // Run per-loop review before considering task complete
         loopManager.updateReviewStatus(loop.loopId, 'in_progress');
+        // Notify TUI of review start
+        const updatedLoop = loopManager.getLoop(loop.loopId);
+        if (updatedLoop) onLoopStateChange?.(updatedLoop);
+
         const otherLoopsSummary = loopManager.getOtherLoopsSummary(loop.loopId, state.tasks);
 
         // Emit review header line once (not per-delta, which fragments the output)
@@ -465,6 +470,10 @@ export async function executeBuildIteration(
           // Review passed - reset revision attempts and proceed
           loopManager.updateReviewStatus(loop.loopId, 'passed', reviewResult.reviewId);
           loopManager.resetRevisionAttempts(loop.loopId);
+          loopManager.incrementIteration(loop.loopId);
+          // Notify TUI of review pass
+          const passedLoop = loopManager.getLoop(loop.loopId);
+          if (passedLoop) onLoopStateChange?.(passedLoop);
 
           // Clear any stale review issues for this task since it completed successfully
           state.context.reviewIssues = (state.context.reviewIssues || []).filter(
@@ -514,6 +523,10 @@ export async function executeBuildIteration(
         // Review failed - check if we've exceeded max revision attempts
         loopManager.updateReviewStatus(loop.loopId, 'failed', reviewResult.reviewId);
         loopManager.incrementRevisionAttempts(loop.loopId);
+        loopManager.incrementIteration(loop.loopId);
+        // Notify TUI of review failure and revision count
+        const failedLoop = loopManager.getLoop(loop.loopId);
+        if (failedLoop) onLoopStateChange?.(failedLoop);
 
         if (loopManager.hasExceededMaxRevisions(loop.loopId, effortConfig.maxRevisionAttempts)) {
           // Exceeded max revisions - mark loop as stuck

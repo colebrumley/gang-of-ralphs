@@ -1,6 +1,6 @@
 import { Box, Text, useStdout } from 'ink';
 import { useEffect, useState } from 'react';
-import type { LoopState } from '../types/index.js';
+import type { LoopReviewStatus, LoopState } from '../types/index.js';
 import { getOutputLineColor, shouldDimOutputLine } from './output-formatting.js';
 
 interface ColumnProps {
@@ -40,6 +40,21 @@ function getStatusIndicator(status: LoopState['status']): { symbol: string; colo
   }
 }
 
+function getReviewIndicator(
+  reviewStatus: LoopReviewStatus
+): { text: string; color: string } | null {
+  switch (reviewStatus) {
+    case 'in_progress':
+      return { text: 'reviewing', color: 'cyan' };
+    case 'passed':
+      return { text: 'review ✓', color: 'green' };
+    case 'failed':
+      return { text: 'review ✗', color: 'red' };
+    default:
+      return null;
+  }
+}
+
 export function Column({ loop, taskTitle, isFocused = false, totalColumns }: ColumnProps) {
   const { stdout } = useStdout();
   const terminalWidth = stdout?.columns || 120;
@@ -72,6 +87,8 @@ export function Column({ loop, taskTitle, isFocused = false, totalColumns }: Col
 
   const idleInfo =
     loop.status === 'running' ? formatIdleTime(loop.stuckIndicators.lastActivityAt, now) : null;
+
+  const reviewIndicator = getReviewIndicator(loop.reviewStatus);
 
   return (
     <Box
@@ -114,6 +131,19 @@ export function Column({ loop, taskTitle, isFocused = false, totalColumns }: Col
           </>
         )}
       </Box>
+
+      {/* Review status - show when reviewing or has revision attempts */}
+      {(reviewIndicator || loop.revisionAttempts > 0) && (
+        <Box paddingX={1}>
+          {reviewIndicator && (
+            <>
+              <Text color={reviewIndicator.color}>{reviewIndicator.text}</Text>
+              {loop.revisionAttempts > 0 && <Text> </Text>}
+            </>
+          )}
+          {loop.revisionAttempts > 0 && <Text color="yellow">rev {loop.revisionAttempts}</Text>}
+        </Box>
+      )}
 
       {/* Worktree path */}
       {loop.worktreePath && (

@@ -236,6 +236,16 @@ export function App({ initialState, tracer }: AppProps) {
             );
           }
         },
+        onLoopStateChange: (updatedLoop) => {
+          // Update loop state in real-time (for review status, revision attempts, etc.)
+          setLoops((prev) =>
+            prev.map((l) =>
+              l.loopId === updatedLoop.loopId
+                ? { ...updatedLoop, output: l.output } // Preserve TUI's buffered output
+                : l
+            )
+          );
+        },
         tracer,
       });
 

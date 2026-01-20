@@ -51,6 +51,25 @@ function createMcpLogger(dbPath: string, runId: string) {
         // Ignore write errors
       }
     },
+    logError(tool: string, input: Record<string, unknown>, error: string, durationMs: number) {
+      // Only log if debug dir exists (debug mode is enabled)
+      if (!existsSync(debugDir)) return;
+
+      const entry = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        tool,
+        input,
+        error,
+        success: false,
+        durationMs,
+      });
+
+      try {
+        appendFileSync(logPath, `${entry}\n`);
+      } catch {
+        // Ignore write errors
+      }
+    },
   };
 }
 
@@ -385,120 +404,121 @@ export function createMCPServer(runId: string, dbPath: string) {
 
     let result: { content: Array<{ type: string; text: string }> };
 
-    switch (name) {
-      case 'write_task': {
-        const task = WriteTaskSchema.parse(args);
-        db.prepare(`
+    try {
+      switch (name) {
+        case 'write_task': {
+          const task = WriteTaskSchema.parse(args);
+          db.prepare(`
           INSERT INTO tasks (id, run_id, title, description, dependencies, estimated_iterations)
           VALUES (?, ?, ?, ?, ?, ?)
         `).run(
-          task.id,
-          runId,
-          task.title,
-          task.description,
-          JSON.stringify(task.dependencies),
-          task.estimatedIterations
-        );
-        result = { content: [{ type: 'text', text: `Task ${task.id} created` }] };
-        break;
-      }
+            task.id,
+            runId,
+            task.title,
+            task.description,
+            JSON.stringify(task.dependencies),
+            task.estimatedIterations
+          );
+          result = { content: [{ type: 'text', text: `Task ${task.id} created` }] };
+          break;
+        }
 
-      case 'complete_task': {
-        const { taskId } = CompleteTaskSchema.parse(args);
-        db.prepare(`
+        case 'complete_task': {
+          const { taskId } = CompleteTaskSchema.parse(args);
+          db.prepare(`
           UPDATE tasks SET status = 'completed' WHERE id = ? AND run_id = ?
         `).run(taskId, runId);
-        result = { content: [{ type: 'text', text: `Task ${taskId} completed` }] };
-        break;
-      }
+          result = { content: [{ type: 'text', text: `Task ${taskId} completed` }] };
+          break;
+        }
 
-      case 'fail_task': {
-        const { taskId, reason } = FailTaskSchema.parse(args);
-        db.prepare(`
+        case 'fail_task': {
+          const { taskId, reason } = FailTaskSchema.parse(args);
+          db.prepare(`
           UPDATE tasks SET status = 'failed' WHERE id = ? AND run_id = ?
         `).run(taskId, runId);
-        // Also log the failure as a context entry
-        db.prepare(`
+          // Also log the failure as a context entry
+          db.prepare(`
           INSERT INTO context (run_id, type, content)
           VALUES (?, 'error', ?)
         `).run(runId, `Task ${taskId} failed: ${reason}`);
-        result = { content: [{ type: 'text', text: `Task ${taskId} marked as failed` }] };
-        break;
-      }
+          result = { content: [{ type: 'text', text: `Task ${taskId} marked as failed` }] };
+          break;
+        }
 
-      case 'add_plan_group': {
-        const group = AddPlanGroupSchema.parse(args);
-        db.prepare(`
+        case 'add_plan_group': {
+          const group = AddPlanGroupSchema.parse(args);
+          db.prepare(`
           INSERT INTO plan_groups (run_id, group_index, task_ids)
           VALUES (?, ?, ?)
         `).run(runId, group.groupIndex, JSON.stringify(group.taskIds));
-        result = { content: [{ type: 'text', text: `Plan group ${group.groupIndex} added` }] };
-        break;
-      }
+          result = { content: [{ type: 'text', text: `Plan group ${group.groupIndex} added` }] };
+          break;
+        }
 
-      case 'update_loop_status': {
-        const update = UpdateLoopStatusSchema.parse(args);
-        db.prepare(`
+        case 'update_loop_status': {
+          const update = UpdateLoopStatusSchema.parse(args);
+          db.prepare(`
           UPDATE loops SET status = ?, last_error = ? WHERE id = ?
         `).run(update.status, update.error || null, update.loopId);
-        result = { content: [{ type: 'text', text: `Loop ${update.loopId} updated` }] };
-        break;
-      }
+          result = { content: [{ type: 'text', text: `Loop ${update.loopId} updated` }] };
+          break;
+        }
 
-      case 'record_cost': {
-        const { costUsd, loopId, phase } = RecordCostSchema.parse(args);
-        if (loopId) {
-          db.prepare(`
+        case 'record_cost': {
+          const { costUsd, loopId, phase } = RecordCostSchema.parse(args);
+          if (loopId) {
+            db.prepare(`
             UPDATE loops SET cost_usd = cost_usd + ? WHERE id = ?
           `).run(costUsd, loopId);
-        }
-        db.prepare(`
+          }
+          db.prepare(`
           UPDATE runs SET total_cost_usd = total_cost_usd + ? WHERE id = ?
         `).run(costUsd, runId);
-        // Track phase costs with upsert
-        db.prepare(`
+          // Track phase costs with upsert
+          db.prepare(`
           INSERT INTO phase_costs (run_id, phase, cost_usd)
           VALUES (?, ?, ?)
           ON CONFLICT(run_id, phase) DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd
         `).run(runId, phase, costUsd);
-        result = {
-          content: [{ type: 'text', text: `Cost $${costUsd} recorded for phase ${phase}` }],
-        };
-        break;
-      }
+          result = {
+            content: [{ type: 'text', text: `Cost $${costUsd} recorded for phase ${phase}` }],
+          };
+          break;
+        }
 
-      case 'create_loop': {
-        const loop = CreateLoopSchema.parse(args);
-        const loopId = crypto.randomUUID();
-        db.prepare(`
+        case 'create_loop': {
+          const loop = CreateLoopSchema.parse(args);
+          const loopId = crypto.randomUUID();
+          db.prepare(`
           INSERT INTO loops (id, run_id, task_ids, max_iterations, review_interval, worktree_path, phase)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
-          loopId,
-          runId,
-          JSON.stringify(loop.taskIds),
-          loop.maxIterations,
-          loop.reviewInterval,
-          loop.worktreePath ?? null,
-          loop.phase
-        );
-        // Update task assignments
-        for (const taskId of loop.taskIds) {
-          db.prepare(`
+            loopId,
+            runId,
+            JSON.stringify(loop.taskIds),
+            loop.maxIterations,
+            loop.reviewInterval,
+            loop.worktreePath ?? null,
+            loop.phase
+          );
+          // Update task assignments
+          for (const taskId of loop.taskIds) {
+            db.prepare(`
             UPDATE tasks SET assigned_loop_id = ? WHERE id = ? AND run_id = ?
           `).run(loopId, taskId, runId);
+          }
+          result = {
+            content: [
+              { type: 'text', text: `Loop ${loopId} created with ${loop.taskIds.length} tasks` },
+            ],
+          };
+          break;
         }
-        result = {
-          content: [
-            { type: 'text', text: `Loop ${loopId} created with ${loop.taskIds.length} tasks` },
-          ],
-        };
-        break;
-      }
 
-      case 'persist_loop_state': {
-        const state = PersistLoopStateSchema.parse(args);
-        db.prepare(`
+        case 'persist_loop_state': {
+          const state = PersistLoopStateSchema.parse(args);
+          db.prepare(`
           UPDATE loops SET
             iteration = ?,
             last_review_at = COALESCE(?, last_review_at),
@@ -508,187 +528,244 @@ export function createMCPServer(runId: string, dbPath: string) {
             last_file_change_iteration = COALESCE(?, last_file_change_iteration)
           WHERE id = ?
         `).run(
-          state.iteration,
-          state.lastReviewAt ?? null,
-          state.sameErrorCount ?? null,
-          state.noProgressCount ?? null,
-          state.lastError ?? null,
-          state.lastFileChangeIteration ?? null,
-          state.loopId
-        );
-        result = {
-          content: [
-            {
-              type: 'text',
-              text: `Loop ${state.loopId} state persisted at iteration ${state.iteration}`,
-            },
-          ],
-        };
-        break;
-      }
+            state.iteration,
+            state.lastReviewAt ?? null,
+            state.sameErrorCount ?? null,
+            state.noProgressCount ?? null,
+            state.lastError ?? null,
+            state.lastFileChangeIteration ?? null,
+            state.loopId
+          );
+          result = {
+            content: [
+              {
+                type: 'text',
+                text: `Loop ${state.loopId} state persisted at iteration ${state.iteration}`,
+              },
+            ],
+          };
+          break;
+        }
 
-      case 'record_phase_cost': {
-        const { phase, costUsd } = RecordPhaseCostSchema.parse(args);
-        // Update total run cost
-        db.prepare(`
+        case 'record_phase_cost': {
+          const { phase, costUsd } = RecordPhaseCostSchema.parse(args);
+          // Update total run cost
+          db.prepare(`
           UPDATE runs SET total_cost_usd = total_cost_usd + ? WHERE id = ?
         `).run(costUsd, runId);
-        // Upsert phase cost
-        db.prepare(`
+          // Upsert phase cost
+          db.prepare(`
           INSERT INTO phase_costs (run_id, phase, cost_usd)
           VALUES (?, ?, ?)
           ON CONFLICT(run_id, phase) DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd
         `).run(runId, phase, costUsd);
-        result = { content: [{ type: 'text', text: `Phase ${phase} cost $${costUsd} recorded` }] };
-        break;
-      }
+          result = {
+            content: [{ type: 'text', text: `Phase ${phase} cost $${costUsd} recorded` }],
+          };
+          break;
+        }
 
-      case 'write_context': {
-        const ctx = WriteContextSchema.parse(args);
-        const { id } = writeContextToDb(db, {
-          runId,
-          type: ctx.type,
-          content: ctx.content,
-          taskId: ctx.task_id,
-          loopId: ctx.loop_id,
-          file: ctx.file,
-          line: ctx.line,
-        });
-        result = {
-          content: [{ type: 'text', text: `Context written (id: ${id}, type: ${ctx.type})` }],
-        };
-        break;
-      }
+        case 'write_context': {
+          const ctx = WriteContextSchema.parse(args);
+          const { id } = writeContextToDb(db, {
+            runId,
+            type: ctx.type,
+            content: ctx.content,
+            taskId: ctx.task_id,
+            loopId: ctx.loop_id,
+            file: ctx.file,
+            line: ctx.line,
+          });
+          result = {
+            content: [{ type: 'text', text: `Context written (id: ${id}, type: ${ctx.type})` }],
+          };
+          break;
+        }
 
-      case 'read_context': {
-        const opts = ReadContextSchema.parse(args);
-        const { entries, total } = readContextFromDb(db, {
-          runId,
-          types: opts.types,
-          taskId: opts.task_id,
-          loopId: opts.loop_id,
-          file: opts.file,
-          search: opts.search,
-          limit: opts.limit,
-          offset: opts.offset,
-          order: opts.order,
-        });
-        result = { content: [{ type: 'text', text: JSON.stringify({ entries, total }) }] };
-        break;
-      }
+        case 'read_context': {
+          const opts = ReadContextSchema.parse(args);
+          const { entries, total } = readContextFromDb(db, {
+            runId,
+            types: opts.types,
+            taskId: opts.task_id,
+            loopId: opts.loop_id,
+            file: opts.file,
+            search: opts.search,
+            limit: opts.limit,
+            offset: opts.offset,
+            order: opts.order,
+          });
+          result = { content: [{ type: 'text', text: JSON.stringify({ entries, total }) }] };
+          break;
+        }
 
-      case 'set_review_result': {
-        const review = SetReviewResultSchema.parse(args);
+        case 'set_review_result': {
+          const review = SetReviewResultSchema.parse(args);
 
-        // Use transaction to ensure atomicity of delete + inserts + update
-        const saveReviewResult = db.transaction(() => {
-          // Clear previous run-level review issues from unified context table
-          db.prepare(
-            `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
-          ).run(runId);
+          // Use transaction to ensure atomicity of delete + inserts + update
+          const saveReviewResult = db.transaction(() => {
+            // Clear previous run-level review issues from unified context table
+            db.prepare(
+              `DELETE FROM context WHERE run_id = ? AND type = 'review_issue' AND loop_id IS NULL`
+            ).run(runId);
 
-          // Store structured review issues in unified context table
-          const insertStmt = db.prepare(`
+            // Store structured review issues in unified context table
+            const insertStmt = db.prepare(`
             INSERT INTO context (run_id, type, content, task_id, file, line)
             VALUES (?, 'review_issue', ?, ?, ?, ?)
           `);
-          for (const issue of review.issues) {
-            insertStmt.run(
-              runId,
-              JSON.stringify({
-                issue_type: issue.type,
-                description: issue.description,
-                suggestion: issue.suggestion,
-              }),
-              issue.taskId ?? null,
-              issue.file,
-              issue.line ?? null
-            );
-          }
+            for (const issue of review.issues) {
+              insertStmt.run(
+                runId,
+                JSON.stringify({
+                  issue_type: issue.type,
+                  description: issue.description,
+                  suggestion: issue.suggestion,
+                }),
+                issue.taskId ?? null,
+                issue.file,
+                issue.line ?? null
+              );
+            }
 
-          // Update runs table for intent analysis
-          db.prepare(`
+            // Update runs table for intent analysis
+            db.prepare(`
             UPDATE runs SET pending_review = 0, interpreted_intent = ?, intent_satisfied = ?
             WHERE id = ?
           `).run(review.interpretedIntent ?? null, review.intentSatisfied ? 1 : 0, runId);
-        });
+          });
 
-        saveReviewResult();
+          saveReviewResult();
 
-        result = {
-          content: [
-            {
-              type: 'text',
-              text: `Review result recorded (passed: ${review.passed}, issues: ${review.issues.length})`,
-            },
-          ],
-        };
-        break;
-      }
+          result = {
+            content: [
+              {
+                type: 'text',
+                text: `Review result recorded (passed: ${review.passed}, issues: ${review.issues.length})`,
+              },
+            ],
+          };
+          break;
+        }
 
-      case 'set_loop_review_result': {
-        const review = SetLoopReviewResultSchema.parse(args);
+        case 'set_loop_review_result': {
+          const review = SetLoopReviewResultSchema.parse(args);
 
-        // Use transaction to ensure atomicity of loop_reviews insert + context inserts
-        const reviewId = crypto.randomUUID();
-        const saveLoopReviewResult = db.transaction(() => {
-          // Create a new loop review record
-          db.prepare(`
+          // Validate loopId exists - provide clear error if not
+          const loopExists = db
+            .prepare('SELECT id FROM loops WHERE id = ? AND run_id = ?')
+            .get(review.loopId, runId) as { id: string } | undefined;
+
+          if (!loopExists) {
+            // List available loops to help the agent
+            const availableLoops = db
+              .prepare('SELECT id, task_ids FROM loops WHERE run_id = ?')
+              .all(runId) as Array<{ id: string; task_ids: string }>;
+
+            const loopList = availableLoops
+              .map((l) => `  - ${l.id} (tasks: ${l.task_ids})`)
+              .join('\n');
+
+            throw new Error(
+              `Loop '${review.loopId}' not found. Available loops for this run:\n${loopList || '  (no loops found)'}\n\nUse the exact loopId from the prompt example.`
+            );
+          }
+
+          // Validate taskId exists - provide clear error if not
+          const taskExists = db
+            .prepare('SELECT id FROM tasks WHERE id = ? AND run_id = ?')
+            .get(review.taskId, runId) as { id: string } | undefined;
+
+          if (!taskExists) {
+            // List available tasks to help the agent
+            const availableTasks = db
+              .prepare('SELECT id, title FROM tasks WHERE run_id = ?')
+              .all(runId) as Array<{ id: string; title: string }>;
+
+            const taskList = availableTasks.map((t) => `  - ${t.id}: ${t.title}`).join('\n');
+
+            throw new Error(
+              `Task '${review.taskId}' not found. Available tasks for this run:\n${taskList || '  (no tasks found)'}\n\nUse the exact taskId from the prompt example (e.g., "task-0", "task-1").`
+            );
+          }
+
+          // Use transaction to ensure atomicity of loop_reviews insert + context inserts
+          const reviewId = crypto.randomUUID();
+          const saveLoopReviewResult = db.transaction(() => {
+            // Create a new loop review record
+            db.prepare(`
             INSERT INTO loop_reviews (id, run_id, loop_id, task_id, passed, interpreted_intent, intent_satisfied)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(
-            reviewId,
-            runId,
-            review.loopId,
-            review.taskId,
-            review.passed ? 1 : 0,
-            review.interpretedIntent ?? null,
-            review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
-          );
+              reviewId,
+              runId,
+              review.loopId,
+              review.taskId,
+              review.passed ? 1 : 0,
+              review.interpretedIntent ?? null,
+              review.intentSatisfied != null ? (review.intentSatisfied ? 1 : 0) : null
+            );
 
-          // Store review issues in unified context table with loop_id
-          const insertStmt = db.prepare(`
+            // Store review issues in unified context table with loop_id
+            const insertStmt = db.prepare(`
             INSERT INTO context (run_id, type, content, task_id, loop_id, file, line)
             VALUES (?, 'review_issue', ?, ?, ?, ?, ?)
           `);
-          for (const issue of review.issues) {
-            insertStmt.run(
-              runId,
-              JSON.stringify({
-                issue_type: issue.type,
-                description: issue.description,
-                suggestion: issue.suggestion,
-                loop_review_id: reviewId,
-              }),
-              review.taskId,
-              review.loopId,
-              issue.file,
-              issue.line ?? null
-            );
-          }
-        });
+            for (const issue of review.issues) {
+              insertStmt.run(
+                runId,
+                JSON.stringify({
+                  issue_type: issue.type,
+                  description: issue.description,
+                  suggestion: issue.suggestion,
+                  loop_review_id: reviewId,
+                }),
+                review.taskId,
+                review.loopId,
+                issue.file,
+                issue.line ?? null
+              );
+            }
+          });
 
-        saveLoopReviewResult();
+          saveLoopReviewResult();
 
-        result = {
-          content: [
-            {
-              type: 'text',
-              text: `Loop review result recorded (loopId: ${review.loopId}, passed: ${review.passed}, issues: ${review.issues.length})`,
-            },
-          ],
-        };
-        break;
+          result = {
+            content: [
+              {
+                type: 'text',
+                text: `Loop review result recorded (loopId: ${review.loopId}, passed: ${review.passed}, issues: ${review.issues.length})`,
+              },
+            ],
+          };
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown tool: ${name}`);
       }
 
-      default:
-        throw new Error(`Unknown tool: ${name}`);
+      const durationMs = Date.now() - startTime;
+      mcpLogger.log(name, args as Record<string, unknown>, { success: true }, durationMs);
+
+      return result;
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      mcpLogger.logError(name, args as Record<string, unknown>, errorMessage, durationMs);
+
+      // Return error as tool result instead of throwing
+      // This gives the agent a clear error message to work with
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error in ${name}: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      };
     }
-
-    const durationMs = Date.now() - startTime;
-    mcpLogger.log(name, args as Record<string, unknown>, { success: true }, durationMs);
-
-    return result;
   });
 
   return server;
