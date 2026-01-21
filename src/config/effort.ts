@@ -45,7 +45,8 @@ const EFFORT_CONFIGS: Record<EffortLevel, EffortConfig> = {
     maxRevisions: 10,
     checkpointReviewInterval: null, // No checkpoint reviews
     maxRevisionAttempts: 2,
-    costLimits: { perLoopMaxUsd: 1.0, perPhaseMaxUsd: 2.0, perRunMaxUsd: 5.0 },
+    // Opus can cost $1-2 per iteration with extended thinking, so allow 2-3 iterations per loop
+    costLimits: { perLoopMaxUsd: 3.0, perPhaseMaxUsd: 8.0, perRunMaxUsd: 15.0 },
     models: {
       analyze: 'haiku',
       enumerate: 'haiku',
