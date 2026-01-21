@@ -251,6 +251,16 @@ export async function executeBuildIteration(
       loopManager.updateLoopStatus(loop.loopId, 'running');
       // Persist loop to database immediately so review agents can find it
       persistLoop(state.runId, loop);
+
+      // Clear any stale review issues for this task from previous failed loops.
+      // When a new loop starts in a fresh worktree, old review feedback (e.g., "fix chmod
+      // on bin/linkcheck") is invalid because that file doesn't exist in the new worktree.
+      if (state.context.reviewIssues) {
+        state.context.reviewIssues = state.context.reviewIssues.filter(
+          (issue) => issue.taskId !== taskId
+        );
+      }
+
       // Notify TUI immediately so it can display the loop and receive output updates
       onLoopCreated?.(loop);
     }
