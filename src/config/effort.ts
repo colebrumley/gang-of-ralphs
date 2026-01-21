@@ -2,7 +2,7 @@ import type { CostLimits, EffortLevel, ModelTier, Phase } from '../types/index.j
 
 // Model IDs for each tier
 const MODEL_IDS: Record<ModelTier, string> = {
-  haiku: 'claude-haiku-4-20250514',
+  haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-5-20250929',
   opus: 'claude-opus-4-20250514',
 };

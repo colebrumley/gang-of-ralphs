@@ -257,6 +257,39 @@ function savePhaseCosts(state: OrchestratorState): void {
 }
 
 /**
+ * Persist a single loop to the database immediately.
+ * This is used when a loop is created to ensure it's available
+ * to other processes (like review agents) before saveRun is called.
+ */
+export function persistLoop(runId: string, loop: LoopState, loopCostUsd = 0): void {
+  const db = getDatabase();
+  db.prepare(`
+    INSERT OR REPLACE INTO loops (
+      id, run_id, task_ids, iteration, max_iterations, review_interval,
+      last_review_at, status, same_error_count, no_progress_count,
+      last_error, last_file_change_iteration, last_activity_at, cost_usd, worktree_path, phase
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    loop.loopId,
+    runId,
+    JSON.stringify(loop.taskIds),
+    loop.iteration,
+    loop.maxIterations,
+    loop.reviewInterval,
+    loop.lastReviewAt,
+    loop.status,
+    loop.stuckIndicators.sameErrorCount,
+    loop.stuckIndicators.noProgressCount,
+    loop.stuckIndicators.lastError,
+    loop.stuckIndicators.lastFileChangeIteration,
+    loop.stuckIndicators.lastActivityAt,
+    loopCostUsd,
+    loop.worktreePath,
+    loop.phase
+  );
+}
+
+/**
  * Persist all active loops to the database.
  * Uses INSERT OR REPLACE to handle both new loops and updates.
  */

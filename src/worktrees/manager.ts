@@ -62,6 +62,41 @@ export class WorktreeManager {
     // Switch to base branch in main repo
     await execAsync(`git checkout "${this.config.baseBranch}"`, { cwd: this.config.repoDir });
 
+    // Commit any untracked files in main repo that would conflict with the merge
+    // This prevents "untracked working tree files would be overwritten by merge" errors
+    try {
+      // Get list of files that exist in the branch we're merging
+      const { stdout: branchFiles } = await execAsync(
+        `git diff --name-only "${this.config.baseBranch}"..."${branchName}"`,
+        { cwd: this.config.repoDir }
+      );
+      const filesToCheck = branchFiles.trim().split('\n').filter(Boolean);
+
+      if (filesToCheck.length > 0) {
+        // Check which of these are untracked in main repo
+        const { stdout: untrackedFiles } = await execAsync(
+          'git ls-files --others --exclude-standard',
+          { cwd: this.config.repoDir }
+        );
+        const untracked = new Set(untrackedFiles.trim().split('\n').filter(Boolean));
+
+        // Find overlap - untracked files that would be created by merge
+        const conflictingUntracked = filesToCheck.filter((f) => untracked.has(f));
+
+        if (conflictingUntracked.length > 0) {
+          // Stage and commit these files before merge to prevent conflict
+          await execAsync(`git add ${conflictingUntracked.map((f) => `"${f}"`).join(' ')}`, {
+            cwd: this.config.repoDir,
+          });
+          await execAsync(`git commit -m "auto-commit untracked files before merge"`, {
+            cwd: this.config.repoDir,
+          });
+        }
+      }
+    } catch {
+      // Ignore - best effort to prevent untracked file conflicts
+    }
+
     // Attempt merge
     try {
       await execAsync(`git merge --no-ff "${branchName}" -m "Merge ${loopId}"`, {

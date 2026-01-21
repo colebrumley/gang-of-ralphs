@@ -18,6 +18,7 @@ import { IdleTimeoutError, createIdleMonitor } from '../../loops/idle-timeout.js
 import type { LoopManager } from '../../loops/manager.js';
 import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
 import { MCP_SERVER_PATH } from '../../paths.js';
+import { persistLoop } from '../../state/index.js';
 import type {
   LoopState,
   OrchestratorState,
@@ -248,6 +249,8 @@ export async function executeBuildIteration(
 
       const loop = await loopManager.createLoop([taskId], state.tasks);
       loopManager.updateLoopStatus(loop.loopId, 'running');
+      // Persist loop to database immediately so review agents can find it
+      persistLoop(state.runId, loop);
       // Notify TUI immediately so it can display the loop and receive output updates
       onLoopCreated?.(loop);
     }
