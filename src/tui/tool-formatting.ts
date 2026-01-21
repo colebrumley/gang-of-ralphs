@@ -182,7 +182,7 @@ function formatEditOutput(result: unknown): string {
   // Check for error
   if (typeof result === 'object' && result !== null) {
     const obj = result as Record<string, unknown>;
-    if (obj.error || obj.is_error) {
+    if (obj.error || obj.is_error || obj.isError) {
       return '\u2192 error';
     }
   }
@@ -201,7 +201,7 @@ function formatWriteOutput(result: unknown): string {
   // Check for error
   if (typeof result === 'object' && result !== null) {
     const obj = result as Record<string, unknown>;
-    if (obj.error || obj.is_error) {
+    if (obj.error || obj.is_error || obj.isError) {
       return '\u2192 error';
     }
 
