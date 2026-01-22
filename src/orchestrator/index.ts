@@ -423,14 +423,24 @@ export async function runOrchestrator(
         state.pendingConflicts.shift();
 
         if (result.resolved) {
-          // Mark the loop as completed (the merge commit was done by the conflict agent)
+          // Mark the loop as completed and remove from activeLoops
+          // This prevents the completed loop from being restored in the next BUILD phase
+          // and potentially triggering incorrect stuck detection
           if (loop) {
             loop.status = 'completed';
+            // Remove the completed loop from activeLoops to keep state clean
+            state.activeLoops = state.activeLoops.filter((l) => l.loopId !== loopId);
           }
 
           // Add the task to completedTasks if not already there
           if (!state.completedTasks.includes(taskId)) {
             state.completedTasks.push(taskId);
+          }
+
+          // Also update the task status in state.tasks for consistency
+          const taskToUpdate = state.tasks.find((t) => t.id === taskId);
+          if (taskToUpdate) {
+            taskToUpdate.status = 'completed';
           }
 
           // Clean up the worktree now that merge is complete
@@ -452,10 +462,18 @@ export async function runOrchestrator(
             }
           }
         } else {
-          // Mark the loop as failed
+          // Mark the loop as failed and remove from activeLoops
           if (loop) {
             loop.status = 'failed';
+            state.activeLoops = state.activeLoops.filter((l) => l.loopId !== loopId);
           }
+
+          // Mark the task as failed
+          const taskToUpdate = state.tasks.find((t) => t.id === taskId);
+          if (taskToUpdate) {
+            taskToUpdate.status = 'failed';
+          }
+
           state.context.errors.push(
             `Conflict resolution failed for loop ${loopId}: ${result.error}`
           );

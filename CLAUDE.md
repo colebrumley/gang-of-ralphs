@@ -39,7 +39,7 @@ npm run typecheck     # Type check without emitting
 ./bin/sq --spec <path> --reset             # Discard state, start fresh
 ./bin/sq --spec <path> --debug             # Enable debug tracing to .sq/debug/<runId>/
 ./bin/sq --spec <path> --max-loops <n>     # Max concurrent parallel loops (default: 4)
-./bin/sq --spec <path> --max-iterations <n> # Max iterations per loop (default: 20)
+./bin/sq --spec <path> --max-iterations <n> # Max iterations per loop (default: 50)
 ./bin/sq --spec <path> --state-dir <path>  # Custom state directory (default: .sq)
 
 # Cleanup
@@ -68,7 +68,7 @@ ANALYZE → [Review?] → ENUMERATE → [Review?] → PLAN → [Review?] → BUI
 
 - **PLAN**: Agent receives task list as JSON, analyzes dependencies, calls `add_plan_group(groupIndex, taskIds)` to create parallel execution groups. Group 0 runs first, then group 1, etc. Tasks in the same group run concurrently.
 
-- **BUILD**: LoopManager spawns parallel agents in isolated git worktrees with full tools (Read, Edit, Write, Bash, Glob, Grep). Per-loop review system runs immediate review after TASK_COMPLETE signal. Injects review feedback via `buildPromptWithFeedback()` on next iteration. Monitors idle timeout (5 minutes), repeated errors, no file changes, and max iterations for stuck detection.
+- **BUILD**: LoopManager spawns parallel agents in isolated git worktrees with full tools (Read, Edit, Write, Bash, Glob, Grep). Uses **Ralph Wiggum patterns** for atomic updates: each iteration makes ONE small change (one file, one function) followed by verification, then outputs ITERATION_DONE to continue the loop. TASK_COMPLETE only when all criteria are met with fresh test evidence. Per-loop review system runs immediate review after TASK_COMPLETE signal. Injects review feedback via `buildPromptWithFeedback()` on next iteration. Monitors idle timeout (5 minutes), repeated errors, no file changes, and max iterations for stuck detection.
 
 - **CONFLICT**: Triggered when worktree merge fails. Spawns agent with conflict files list and task description to resolve using Read, Edit, Write, Bash tools. Returns resolved boolean and error message.
 

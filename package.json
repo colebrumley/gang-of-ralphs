@@ -1,6 +1,6 @@
 {
   "name": "claude-squad",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "AI orchestration system that coordinates multiple Claude Code agents to implement software from specifications",
   "main": "dist/index.js",
   "type": "module",

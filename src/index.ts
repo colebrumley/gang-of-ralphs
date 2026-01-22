@@ -146,18 +146,35 @@ async function main() {
     const dbPath = join(stateDir, 'state.db');
     if (!existsSync(stateDir)) {
       const { appendFileSync, mkdirSync, readFileSync } = await import('node:fs');
+      const { execSync } = await import('node:child_process');
       mkdirSync(stateDir, { recursive: true });
 
       // Add .sq to .gitignore if not already present
       const gitignorePath = join(process.cwd(), '.gitignore');
       const sqPattern = '.sq/';
+      let gitignoreModified = false;
       if (existsSync(gitignorePath)) {
         const content = readFileSync(gitignorePath, 'utf-8');
         if (!content.split('\n').some((line) => line.trim() === '.sq' || line.trim() === '.sq/')) {
           appendFileSync(gitignorePath, `\n${sqPattern}\n`);
+          gitignoreModified = true;
         }
       } else {
         appendFileSync(gitignorePath, `${sqPattern}\n`);
+        gitignoreModified = true;
+      }
+
+      // Commit .gitignore to prevent untracked file conflicts during worktree merges
+      if (gitignoreModified) {
+        try {
+          execSync('git add .gitignore', { cwd: process.cwd(), stdio: 'pipe' });
+          execSync('git commit -m "chore: add .sq to .gitignore"', {
+            cwd: process.cwd(),
+            stdio: 'pipe',
+          });
+        } catch {
+          // Ignore errors (not a git repo, or commit failed for other reasons)
+        }
       }
     }
     createDatabase(dbPath);

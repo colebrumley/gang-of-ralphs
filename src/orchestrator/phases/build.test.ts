@@ -366,10 +366,10 @@ describe('buildIterationPrompt', () => {
     assignedLoopId: null,
   };
 
-  test('includes Iron Law verification section', () => {
+  test('includes Atomic Update Rule section', () => {
     const prompt = buildIterationPrompt(mockTask, null, 1, 10, []);
-    assert.ok(prompt.includes('Iron Law'));
-    assert.ok(prompt.includes('NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE'));
+    assert.ok(prompt.includes('Atomic Update Rule'));
+    assert.ok(prompt.includes('Each iteration = ONE atomic change + verification'));
   });
 
   test('includes task details', () => {

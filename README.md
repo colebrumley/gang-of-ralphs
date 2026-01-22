@@ -2,6 +2,17 @@
 
 AI orchestration system that coordinates multiple Claude Code agents to implement software from specs. Breaks work into tasks, plans execution order, spawns parallel agents in isolated git worktrees, and merges results.
 
+## Build Loop Methodology
+
+Build loops use **Ralph Wiggum patterns** for reliable, incremental progress:
+
+- **Atomic updates**: Each iteration makes ONE small change (create one file, add one function, fix one bug)
+- **Continuous verification**: Every change is followed by tests/typecheck/build
+- **Scratchpad memory**: Agents read/write progress to persist context across iterations
+- **Default to ITERATION_DONE**: Agents continue looping until ALL criteria are met
+
+This approach ensures small, debuggable changes with verification at each step, rather than monolithic implementations that are hard to debug when they fail.
+
 ## Development
 
 ```bash

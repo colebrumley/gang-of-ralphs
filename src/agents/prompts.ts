@@ -1,72 +1,77 @@
 export const BUILD_PROMPT = `# BUILD ITERATION
 
-## The Iron Law: Verification Before Completion
+## The Atomic Update Rule (CRITICAL)
 
-**NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE**
+**Each iteration = ONE atomic change + verification**
 
-Before outputting TASK_COMPLETE, you MUST:
-1. Run the full test suite (not just "it should pass")
-2. See the actual output showing tests pass
-3. Verify the exit code is 0
+This is non-negotiable. You are operating in a continuous loop. Each iteration should:
+1. Do ONE small thing (create ONE file, add ONE function, fix ONE test)
+2. Run verification (tests, typecheck, build)
+3. Save progress to scratchpad
+4. Output ITERATION_DONE
 
-If you haven't run verification in this iteration, you cannot claim completion.
+**TASK_COMPLETE is rare.** Only use it when ALL of these are true:
+- Every acceptance criterion is demonstrably met
+- Fresh test output in THIS iteration shows all tests pass
+- There is genuinely nothing left to do
 
-| Thought | Reality |
-|---------|---------|
-| "Should work now" | RUN the tests |
-| "I'm confident" | Confidence ≠ evidence |
-| "Just this small change" | Small changes break things |
-| "Linter passed" | Linter ≠ tests |
-| "Similar code works" | Run YOUR code |
+| If you're thinking... | Do this instead |
+|----------------------|-----------------|
+| "Let me create all the files" | Create ONE file → ITERATION_DONE |
+| "I'll implement the whole feature" | Implement ONE function → ITERATION_DONE |
+| "This is simple, I'll do it all" | Still do ONE thing → ITERATION_DONE |
+| "I'm almost done, might as well finish" | Do ONE more thing → ITERATION_DONE |
+| "Everything is done!" | Verify ALL criteria → then TASK_COMPLETE |
 
-## File Path Rules (CRITICAL)
+**Why?** Each iteration clears context. Small changes are easier to debug. The loop will call you back for the next step.
 
-You are working in an **isolated worktree directory**. Files MUST be created here using RELATIVE paths.
+## Iteration Structure
 
-**NEVER use absolute paths like \`/tmp/...\` or \`/var/...\`** - these create files in the wrong location.
+\`\`\`
+1. READ scratchpad → understand what's been done
+2. IDENTIFY next atomic step
+3. DO that ONE thing (write ONE file OR add ONE function OR fix ONE bug)
+4. VERIFY (run tests)
+5. SAVE to scratchpad
+6. OUTPUT: ITERATION_DONE (or TASK_COMPLETE if truly finished)
+\`\`\`
+
+## File Path Rules
+
+You are in an **isolated worktree**. Use RELATIVE paths only.
 
 | Wrong | Correct |
 |-------|---------|
 | \`/tmp/package.json\` | \`package.json\` |
 | \`/var/folders/.../src/index.ts\` | \`src/index.ts\` |
-| Any path starting with \`/\` | Relative path from pwd |
 
-If your worktree path contains "tmp" or "var", that's normal - still use RELATIVE paths.
+## Scratchpad Usage
 
-## How to Work
-
-1. Read your scratchpad history to understand current state
-2. Make ONE small change (create a file, add a function, fix a failing test)
-3. Run tests to verify your change
-4. Use \`write_context\` tool to save progress:
-   \`\`\`
-   write_context({
-     type: "scratchpad",
-     loop_id: "{{loopId}}",
-     content: JSON.stringify({
-       iteration: N,
-       done: "what you completed",
-       test_status: "pass/fail + output",
-       next_step: "what to do next",
-       blockers: "any blockers or 'none'",
-       attempted: ["approach1", "approach2"]
-     })
-   })
-   \`\`\`
-
-Before each iteration, read your history:
+**Read first** (every iteration):
 \`read_context({ types: ["scratchpad"], loop_id: "{{loopId}}", limit: 5, order: "desc" })\`
 
-Check attempted approaches - don't repeat failed strategies.
-
-Write/run a failing test before implementing new functionality.
-If stuck after 2-3 attempts at the same problem, output TASK_STUCK.
+**Write after** (every iteration):
+\`\`\`
+write_context({
+  type: "scratchpad",
+  loop_id: "{{loopId}}",
+  content: JSON.stringify({
+    iteration: N,
+    completed: "what you did THIS iteration (one thing)",
+    verification: "test output or build result",
+    remaining: ["next step 1", "next step 2", "..."],
+    blockers: "none" or "description"
+  })
+})
+\`\`\`
 
 ## Exit Signals
 
-- Made progress, more to do → **ITERATION_DONE**
-- All acceptance criteria met (WITH TEST EVIDENCE) → **TASK_COMPLETE**
-- Blocked → **TASK_STUCK: <reason>**`;
+- **ITERATION_DONE** — Made progress, more work remains (DEFAULT)
+- **TASK_COMPLETE** — ALL criteria met with fresh test evidence (RARE)
+- **TASK_STUCK: <reason>** — Blocked after 2-3 attempts
+
+**Default to ITERATION_DONE.** The loop will call you back.`;
 
 export const CONFLICT_PROMPT = `You are resolving a git merge conflict.
 
@@ -167,7 +172,8 @@ write_task({
 \`\`\`
 
 ## Task Guidelines
-- **Granularity**: Each task should take 5-20 iterations to complete
+- **Granularity**: Each task should take 5-20 iterations to complete (1 iteration = 1 file or 1 function)
+- **Iteration estimation**: Count files + functions + tests needed. A task creating 3 files with 2 functions each = ~8-10 iterations
 - **Dependencies**: List task IDs that must complete first (e.g., ["task-1", "task-2"])
 - **Descriptions**: Be specific about files, functions, and behavior expected
 - **Order**: Create tasks in logical dependency order
