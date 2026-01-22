@@ -19,6 +19,7 @@ import type { LoopManager } from '../../loops/manager.js';
 import { detectStuck, updateStuckIndicators } from '../../loops/stuck-detection.js';
 import { MCP_SERVER_PATH } from '../../paths.js';
 import { persistLoop } from '../../state/index.js';
+import { formatToolInput, formatToolOutput } from '../../tui/tool-formatting.js';
 import type {
   LoopState,
   OrchestratorState,
@@ -28,11 +29,33 @@ import type {
 } from '../../types/index.js';
 import {
   type StreamEvent,
+  extractInputJsonDelta,
+  extractToolUseStart,
+  isContentBlockStop,
+  isInputJsonDelta,
   isResultMessage,
   isStreamEventMessage,
-  isToolProgressMessage,
+  isToolUseStart,
 } from '../../types/index.js';
 import { executeLoopReview } from './review.js';
+
+/**
+ * Pending tool call tracking for accumulating streamed input JSON.
+ * Maps content block index to tool metadata and accumulated input.
+ */
+interface PendingToolCall {
+  name: string;
+  toolId: string;
+  inputJson: string;
+}
+
+/**
+ * Type for completed tool calls to look up by tool_use_id for result formatting.
+ */
+interface CompletedToolCall {
+  name: string;
+  input: Record<string, unknown>;
+}
 
 /**
  * Gets a snapshot of the current git state for detecting file changes.
@@ -295,6 +318,11 @@ export async function executeBuildIteration(
     let lineBuffer = '';
     let thinkingLineBuffer = '';
 
+    // Pending tool calls map: index -> tool info with accumulated input JSON
+    const pendingToolCalls = new Map<number, PendingToolCall>();
+    // Completed tool calls map: toolId -> tool info with parsed input (for result formatting)
+    const completedToolCalls = new Map<string, CompletedToolCall>();
+
     // Start streaming writer
     const writer = tracer?.startAgentCall({
       phase: 'build',
@@ -333,29 +361,67 @@ export async function executeBuildIteration(
             idleMonitor.recordActivity();
             loopManager.updateLastActivity(loop.loopId);
 
-            // Handle tool progress messages to show activity during tool execution
-            if (isToolProgressMessage(message)) {
-              const toolName = message.tool_name || 'tool';
-              const elapsed = message.elapsed_time_seconds || 0;
-              const progressText = `[tool] ${toolName} (${elapsed.toFixed(1)}s)`;
-              writer?.appendOutput(`${progressText}\n`);
-              onLoopOutput?.(loop.loopId, `${progressText}\n`);
-              loopManager.appendOutput(loop.loopId, progressText);
-            }
-            // Handle streaming events for real-time thinking output
+            // Handle streaming events for real-time thinking output and tool tracking
             if (isStreamEventMessage(message)) {
               const event = message.event as StreamEvent;
-              // Handle tool_use content block start to show when a tool begins
-              if (
-                event.type === 'content_block_start' &&
-                event.content_block?.type === 'tool_use'
-              ) {
-                const toolName = event.content_block.name || 'tool';
-                const toolText = `[tool] starting ${toolName}`;
-                writer?.appendOutput(`${toolText}\n`);
-                onLoopOutput?.(loop.loopId, `${toolText}\n`);
-                loopManager.appendOutput(loop.loopId, toolText);
+
+              // Handle tool_use content block start - store in pending map
+              if (isToolUseStart(event)) {
+                const toolInfo = extractToolUseStart(event);
+                if (toolInfo) {
+                  pendingToolCalls.set(toolInfo.index, {
+                    name: toolInfo.toolName,
+                    toolId: toolInfo.toolId,
+                    inputJson: '',
+                  });
+                }
               }
+
+              // Handle input_json_delta - accumulate JSON in pending map
+              if (isInputJsonDelta(event)) {
+                const deltaInfo = extractInputJsonDelta(event);
+                if (deltaInfo) {
+                  const pending = pendingToolCalls.get(deltaInfo.index);
+                  if (pending) {
+                    pending.inputJson += deltaInfo.partialJson;
+                  }
+                }
+              }
+
+              // Handle content_block_stop - parse input, display compact summary, move to completed
+              if (isContentBlockStop(event) && event.index !== undefined) {
+                const pending = pendingToolCalls.get(event.index);
+                if (pending) {
+                  // Try to parse the accumulated JSON
+                  let parsedInput: Record<string, unknown> = {};
+                  try {
+                    if (pending.inputJson) {
+                      parsedInput = JSON.parse(pending.inputJson);
+                    }
+                  } catch {
+                    // If JSON parsing fails, use empty object
+                    parsedInput = {};
+                  }
+
+                  // Store in completed map for result formatting
+                  completedToolCalls.set(pending.toolId, {
+                    name: pending.name,
+                    input: parsedInput,
+                  });
+
+                  // Format compact summary for TUI
+                  const toolText = formatToolInput(pending.name, parsedInput);
+                  loopManager.appendOutput(loop.loopId, toolText);
+
+                  // Write full details to agent log
+                  writer?.appendOutput(`\n${toolText}\n`);
+                  writer?.appendOutput(`Input: ${JSON.stringify(parsedInput, null, 2)}\n`);
+
+                  // Clean up pending entry
+                  pendingToolCalls.delete(event.index);
+                }
+              }
+
               // Handle thinking delta events
               if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
                 const thinkingText = event.delta.thinking || '';
@@ -412,6 +478,65 @@ export async function executeBuildIteration(
                   writer?.appendOutput(thinkingText);
                   onLoopOutput?.(loop.loopId, thinkingText);
                   loopManager.appendOutput(loop.loopId, thinkingText);
+                }
+              }
+            }
+            // Handle user messages with tool_result blocks to display compact output summaries
+            if (message.type === 'user' && message.message?.content) {
+              const content = message.message.content;
+              // Content can be array of blocks
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (
+                    typeof block === 'object' &&
+                    block !== null &&
+                    'type' in block &&
+                    block.type === 'tool_result' &&
+                    'tool_use_id' in block
+                  ) {
+                    const toolUseId = block.tool_use_id as string;
+                    const completedTool = completedToolCalls.get(toolUseId);
+                    if (completedTool) {
+                      // Extract the result content
+                      let resultContent: unknown = null;
+                      if ('content' in block) {
+                        // Content can be string or array of content blocks
+                        const blockContent = block.content;
+                        if (typeof blockContent === 'string') {
+                          resultContent = blockContent;
+                        } else if (Array.isArray(blockContent)) {
+                          // Try to extract text from content array
+                          const textParts = blockContent
+                            .filter(
+                              (c): c is { type: 'text'; text: string } =>
+                                typeof c === 'object' &&
+                                c !== null &&
+                                'type' in c &&
+                                c.type === 'text' &&
+                                'text' in c
+                            )
+                            .map((c) => c.text);
+                          resultContent = textParts.join('');
+                        }
+                      }
+
+                      // Format compact output summary for TUI
+                      const outputText = formatToolOutput(
+                        completedTool.name,
+                        completedTool.input,
+                        resultContent
+                      );
+                      if (outputText) {
+                        loopManager.appendOutput(loop.loopId, outputText);
+                      }
+
+                      // Write full result to agent log
+                      writer?.appendOutput(`Result: ${JSON.stringify(resultContent)}\n`);
+
+                      // Clean up completed tool entry
+                      completedToolCalls.delete(toolUseId);
+                    }
+                  }
                 }
               }
             }
